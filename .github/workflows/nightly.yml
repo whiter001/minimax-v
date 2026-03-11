@@ -2,7 +2,7 @@ name: Nightly Build
 
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: "0 0 * * *"
   workflow_dispatch:
 
 permissions:
@@ -47,16 +47,13 @@ jobs:
         include:
           - target: linux-x86_64
             os: ubuntu-latest
-            bin_ext: ''
+            bin_ext: ""
           - target: windows-x86_64
             os: windows-latest
-            bin_ext: '.exe'
-          - target: darwin-x86_64
-            os: macos-13
-            bin_ext: ''
+            bin_ext: ".exe"
           - target: darwin-arm64
             os: macos-14
-            bin_ext: ''
+            bin_ext: ""
 
     steps:
       - name: Checkout
@@ -138,7 +135,6 @@ jobs:
             echo
             echo '- `minimax-v-linux-x86_64.zip`'
             echo '- `minimax-v-windows-x86_64.zip`'
-            echo '- `minimax-v-darwin-x86_64.zip`'
             echo '- `minimax-v-darwin-arm64.zip`'
             echo
             echo '### Verification performed'
