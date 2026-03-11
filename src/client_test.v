@@ -1,0 +1,467 @@
+module main
+
+// ===== estimate_tokens =====
+
+fn test_estimate_tokens_empty() {
+	mut client := new_api_client(default_config())
+	assert client.estimate_tokens() == 0
+}
+
+fn test_estimate_tokens_with_messages() {
+	mut client := new_api_client(default_config())
+	client.add_message('user', 'hello world') // 11 chars
+	// 11 / 2.5 = 4.4 → 4
+	assert client.estimate_tokens() == 4
+}
+
+fn test_estimate_tokens_with_system_prompt() {
+	mut config := default_config()
+	config.system_prompt = 'x'.repeat(250) // 250 chars → 100 tokens
+	mut client := new_api_client(config)
+	assert client.estimate_tokens() == 100
+}
+
+fn test_estimate_tokens_with_content_json() {
+	mut client := new_api_client(default_config())
+	client.messages << ChatMessage{
+		role:         'assistant'
+		content:      ''
+		content_json: '{"type":"text","text":"hello"}'
+	}
+	est := client.estimate_tokens()
+	// JSON is 29 chars, 29 / 2.5 ≈ 12
+	assert est > 0 && est <= 15
+}
+
+// ===== add_message =====
+
+fn test_add_message() {
+	mut client := new_api_client(default_config())
+	client.add_message('user', 'test')
+	assert client.messages.len == 1
+	assert client.messages[0].role == 'user'
+	assert client.messages[0].content == 'test'
+}
+
+// ===== clear_messages =====
+
+fn test_clear_messages() {
+	mut client := new_api_client(default_config())
+	client.add_message('user', 'test')
+	client.add_message('assistant', 'reply')
+	assert client.messages.len == 2
+	client.clear_messages()
+	assert client.messages.len == 0
+}
+
+// ===== build_request_json =====
+
+fn test_build_request_json_basic() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	mut client := new_api_client(config)
+	client.add_message('user', 'hello')
+	json := client.build_request_json()
+	assert json.contains('"model":"MiniMax-M2.5"')
+	assert json.contains('"max_tokens":200000')
+	assert json.contains('"role":"user"')
+	assert json.contains('"content":"hello"')
+}
+
+fn test_build_request_json_with_system_prompt() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.system_prompt = 'Be helpful'
+	mut client := new_api_client(config)
+	client.add_message('user', 'hi')
+	json := client.build_request_json()
+	assert json.contains('"system":')
+	assert json.contains('Be helpful')
+}
+
+fn test_build_request_json_with_streaming() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	mut client := new_api_client(config)
+	client.use_streaming = true
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('"stream":true')
+}
+
+fn test_build_request_json_with_tools() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	mut client := new_api_client(config)
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('"tools":')
+	assert json.contains('"name":"read_file"')
+}
+
+fn test_build_request_json_with_workspace() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.workspace = '/tmp/project'
+	mut client := new_api_client(config)
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('Working directory')
+	assert json.contains('/tmp/project')
+}
+
+fn test_build_request_json_agent_prompt_injected() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	// No custom system prompt
+	mut client := new_api_client(config)
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('helpful AI assistant')
+}
+
+fn test_build_request_json_custom_prompt_overrides_agent() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	config.system_prompt = 'Custom prompt'
+	mut client := new_api_client(config)
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('Custom prompt')
+	assert !json.contains('helpful AI assistant')
+}
+
+fn test_build_request_json_content_json_message() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	mut client := new_api_client(config)
+	client.messages << ChatMessage{
+		role:         'assistant'
+		content:      ''
+		content_json: '[{"type":"text","text":"hello"}]'
+	}
+	json := client.build_request_json()
+	assert json.contains('"content":[{"type":"text","text":"hello"}]')
+}
+
+fn test_normalize_tool_uses_browser_wait_for_defaults_time() {
+	mut tools := [
+		ToolUse{
+			id:    'tu_1'
+			name:  'browser_wait_for'
+			input: map[string]string{}
+		},
+	]
+	changed := normalize_tool_uses(mut tools)
+	assert changed
+	assert tools[0].input['time'] == '1'
+}
+
+fn test_build_assistant_content_json_with_tool_use() {
+	tools := [
+		ToolUse{
+			id:    'tu_1'
+			name:  'browser_wait_for'
+			input: {
+				'time': '1'
+			}
+		},
+	]
+	json := build_assistant_content_json('hello', 'thinking', tools)
+	assert json.contains('"type":"thinking"')
+	assert json.contains('"type":"text"')
+	assert json.contains('"type":"tool_use"')
+	assert json.contains('"name":"browser_wait_for"')
+	assert json.contains('"time":1')
+}
+
+fn test_sanitize_messages_for_api_keeps_valid_tool_pair() {
+	messages := [
+		ChatMessage{
+			role:         'assistant'
+			content_json: '[{"type":"text","text":"reading"},{"type":"tool_use","id":"tu_1","name":"read_file","input":{"path":"a.txt"}}]'
+		},
+		ChatMessage{
+			role:         'user'
+			content_json: '[{"type":"tool_result","tool_use_id":"tu_1","content":"file content"}]'
+		},
+	]
+	sanitized, changed := sanitize_messages_for_api(messages)
+	assert !changed
+	assert sanitized.len == 2
+	assert sanitized[0].content_json.contains('"type":"tool_use"')
+	assert sanitized[1].content_json.contains('"type":"tool_result"')
+}
+
+fn test_sanitize_messages_for_api_converts_orphan_tool_result() {
+	messages := [
+		ChatMessage{
+			role:    'user'
+			content: 'hello'
+		},
+		ChatMessage{
+			role:         'user'
+			content_json: '[{"type":"tool_result","tool_use_id":"tu_1","content":"file content"}]'
+		},
+	]
+	sanitized, changed := sanitize_messages_for_api(messages)
+	assert changed
+	assert sanitized.len == 2
+	assert sanitized[1].content_json.len == 0
+	assert sanitized[1].content.contains('Historical tool result')
+	assert sanitized[1].content.contains('file content')
+}
+
+fn test_sanitize_messages_for_api_converts_mismatched_tool_pair() {
+	messages := [
+		ChatMessage{
+			role:         'assistant'
+			content_json: '[{"type":"tool_use","id":"tu_1","name":"read_file","input":{"path":"a.txt"}}]'
+		},
+		ChatMessage{
+			role:         'user'
+			content_json: '[{"type":"tool_result","tool_use_id":"tu_2","content":"wrong file"}]'
+		},
+	]
+	sanitized, changed := sanitize_messages_for_api(messages)
+	assert changed
+	assert sanitized.len == 2
+	assert sanitized[0].content_json.len == 0
+	assert sanitized[0].content.contains('Historical assistant')
+		|| sanitized[0].content.contains('reading') == false
+	assert sanitized[1].content_json.len == 0
+	assert sanitized[1].content.contains('Historical tool result')
+}
+
+fn test_tool_pair_ids_match_requires_exact_id_set() {
+	tool_use_msg := ChatMessage{
+		role:         'assistant'
+		content_json: '[{"type":"tool_use","id":"tu_1","name":"read_file","input":{"path":"a.txt"}},{"type":"tool_use","id":"tu_2","name":"list_dir","input":{"path":"."}}]'
+	}
+	matching_tool_result_msg := ChatMessage{
+		role:         'user'
+		content_json: '[{"type":"tool_result","tool_use_id":"tu_1","content":"ok"},{"type":"tool_result","tool_use_id":"tu_2","content":"ok"}]'
+	}
+	mismatched_tool_result_msg := ChatMessage{
+		role:         'user'
+		content_json: '[{"type":"tool_result","tool_use_id":"tu_1","content":"ok"}]'
+	}
+	assert tool_pair_ids_match(tool_use_msg, matching_tool_result_msg)
+	assert !tool_pair_ids_match(tool_use_msg, mismatched_tool_result_msg)
+}
+
+fn test_adjust_summary_boundary_for_tool_pairs() {
+	messages := [
+		ChatMessage{
+			role:    'user'
+			content: 'older context'
+		},
+		ChatMessage{
+			role:         'assistant'
+			content_json: '[{"type":"tool_use","id":"tu_1","name":"read_file","input":{"path":"a.txt"}}]'
+		},
+		ChatMessage{
+			role:         'user'
+			content_json: '[{"type":"tool_result","tool_use_id":"tu_1","content":"file content"}]'
+		},
+		ChatMessage{
+			role:    'assistant'
+			content: 'done'
+		},
+		ChatMessage{
+			role:    'user'
+			content: 'next prompt'
+		},
+	]
+	assert adjust_summary_boundary_for_tool_pairs(messages, 2) == 1
+	assert adjust_summary_boundary_for_tool_pairs(messages, 3) == 3
+}
+
+fn test_normalize_tool_uses_playwright_defaults() {
+	mut tools := [
+		ToolUse{
+			id:    'tu_1'
+			name:  'browser_take_screenshot'
+			input: map[string]string{}
+		},
+		ToolUse{
+			id:    'tu_2'
+			name:  'browser_console_messages'
+			input: map[string]string{}
+		},
+		ToolUse{
+			id:    'tu_3'
+			name:  'browser_network_requests'
+			input: map[string]string{}
+		},
+	]
+	changed := normalize_tool_uses(mut tools)
+	assert changed
+	assert tools[0].input['type'] == 'png'
+	assert tools[1].input['level'] == 'info'
+	assert tools[2].input['includeStatic'] == 'false'
+}
+
+// ===== new_api_client =====
+
+fn test_new_api_client() {
+	mut config := default_config()
+	config.api_key = 'sk-test'
+	config.max_rounds = 50
+	config.workspace = '/tmp'
+	config.token_limit = 100000
+	client := new_api_client(config)
+	assert client.api_key == 'sk-test'
+	assert client.max_rounds == 50
+	assert client.workspace == '/tmp'
+	assert client.token_limit == 100000
+	assert client.messages.len == 0
+}
+
+fn test_normalize_tool_command_collapses_whitespace() {
+	assert normalize_tool_command('  ls   -la\n /tmp  ') == 'ls -la /tmp'
+}
+
+fn test_tool_use_batch_signature_is_stable() {
+	tools := [
+		ToolUse{
+			id:    'tu_1'
+			name:  'bash'
+			input: {
+				'command': 'pwd'
+				'restart': 'false'
+			}
+		},
+	]
+	assert tool_use_batch_signature(tools) == 'bash(command=pwd,restart=false)'
+}
+
+fn test_should_block_repeated_failed_bash_command() {
+	tool := ToolUse{
+		id:    'tu_1'
+		name:  'bash'
+		input: {
+			'command': '  ls   missing-dir '
+		}
+	}
+	assert !should_block_repeated_failed_bash_command(tool, 'ls missing-dir', 1)
+	assert should_block_repeated_failed_bash_command(tool, 'ls missing-dir', 2)
+}
+
+fn test_build_tool_error_results_json_marks_errors() {
+	tools := [
+		ToolUse{
+			id:    'tu_1'
+			name:  'read_file'
+			input: {
+				'path': 'a.txt'
+			}
+		},
+	]
+	json := build_tool_error_results_json(tools, 'stop now')
+	assert json.contains('"is_error":true')
+	assert json.contains('"tool_use_id":"tu_1"')
+	assert json.contains('stop now')
+}
+
+// ===== build_request_json: skills metadata injection =====
+
+fn test_build_request_json_skills_metadata_injected() {
+	// Setup skill registry
+	skill_registry.skills = []
+	skill_registry.loaded = false
+	for s in get_builtin_skills() {
+		skill_registry.skills << s
+	}
+	skill_registry.loaded = true
+
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	mut client := new_api_client(config)
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	// When tools are enabled, skills metadata should be injected
+	assert json.contains('Available Skills')
+	assert json.contains('activate_skill')
+	assert json.contains('coder')
+}
+
+fn test_build_request_json_no_skills_without_tools() {
+	skill_registry.skills = []
+	skill_registry.loaded = false
+	for s in get_builtin_skills() {
+		skill_registry.skills << s
+	}
+	skill_registry.loaded = true
+
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = false
+	mut client := new_api_client(config)
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	// Without tools, skills metadata should NOT be injected
+	assert !json.contains('Available Skills')
+}
+
+// ===== build_request_json: plan mode =====
+
+fn test_build_request_json_plan_mode() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	mut client := new_api_client(config)
+	client.plan_mode = true
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('PLAN MODE')
+	assert json.contains('sequentialthinking')
+}
+
+fn test_build_request_json_no_plan_mode() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	mut client := new_api_client(config)
+	client.plan_mode = false
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert !json.contains('PLAN MODE')
+}
+
+// ===== build_request_json: tools schema contains activate_skill =====
+
+fn test_build_request_json_activate_skill_in_tools() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	mut client := new_api_client(config)
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('"name":"activate_skill"')
+}
+
+fn test_build_request_json_includes_working_checkpoint() {
+	prev_cp := working_checkpoint
+	prev_loaded := working_checkpoint_loaded
+	working_checkpoint = WorkingCheckpoint{
+		key_info:    'Remember constraints'
+		related_sop: 'memory/plan_sop.md'
+	}
+	working_checkpoint_loaded = true
+	defer {
+		working_checkpoint = prev_cp
+		working_checkpoint_loaded = prev_loaded
+	}
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	mut client := new_api_client(config)
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('Working checkpoint')
+	assert json.contains('Remember constraints')
+}

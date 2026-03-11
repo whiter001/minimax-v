@@ -1,0 +1,37 @@
+#!/bin/bash
+
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+find_cmd() {
+	local name="$1"
+	shift
+
+	if command -v "$name" >/dev/null 2>&1; then
+		command -v "$name"
+		return 0
+	fi
+
+	local candidate
+	for candidate in "$@"; do
+		if [ -x "$candidate" ]; then
+			echo "$candidate"
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+v_bin="$(find_cmd v /opt/homebrew/bin/v /usr/local/bin/v "$HOME/bin/v" "$HOME/.local/bin/v")" || {
+	echo "❌ V compiler not found. Please install V from https://vlang.io/"
+	exit 1
+}
+
+echo "[pre-push] Building project..."
+bash ./build.sh
+
+echo "[pre-push] Running unit tests..."
+"$v_bin" -enable-globals test src/

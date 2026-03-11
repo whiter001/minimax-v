@@ -1,0 +1,40 @@
+# Compiled binaries
+minimax_cli
+minimax_cli_new
+minimax_cli.exe
+minimax-v
+
+# V compiler cache
+*.o
+*.tmp
+*.o.d
+
+# OS files
+.DS_Store
+Thumbs.db
+.DS_Store?
+._*
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.playwright-mcp/
+
+# Logs and outputs
+*.log
+mcp_stdout.txt
+mcp_stderr.txt
+test_output.txt
+debug/
+logs/
+
+# Temporary artifacts
+CUsers*
+bash_out_*
+
+*.log
+nul
+.codebuddy/

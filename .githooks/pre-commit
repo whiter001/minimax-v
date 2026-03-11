@@ -1,0 +1,9 @@
+#!/bin/bash
+
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "[pre-commit] Checking V formatting..."
+bash ./tests/check_vfmt.sh

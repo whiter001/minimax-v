@@ -1,0 +1,17 @@
+{
+  "servers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "pnpm",
+      "args": ["dlx", "@playwright/mcp", "--extension", "--browser", "chrome"],
+      "env": {
+        "PLAYWRIGHT_MCP_EXTENSION_TOKEN": "4HLQmp82gQWykHKiBGP72CNjqMMGIh7yZuCO65J4aCE"
+      }
+    },
+    "pueue": {
+      "type": "stdio",
+      "command": "/Users/byf/bl/github/pueue-mcp/pueue-mcp",
+      "args": []
+    }
+  }
+}

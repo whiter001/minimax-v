@@ -1,0 +1,41 @@
+# MiniMax CLI 配置文件示例
+# 路径: ~/.config/minimax/config
+#
+# 所有配置项均可通过环境变量覆盖（优先级更高）
+# 环境变量格式: MINIMAX_<KEY> (如 MINIMAX_API_KEY)
+
+# === API 设置 ===
+api_key=sk-cp-your-api-key-here
+api_url=https://api.minimaxi.com/anthropic/v1/messages
+
+# === 模型参数 ===
+model=MiniMax-M2.5
+temperature=0.7
+# 单次回答最多生成多少 token。单位是 token，不是字符数。
+# 对 MiniMax M2.5，日常编码场景推荐 32768，兼顾长输出与上下文余量。
+max_tokens=32768
+
+# === 功能开关 ===
+# 启用 AI 工具调用（AI 可主动读写文件、执行命令）
+enable_tools=true
+# 启用鼠标/键盘控制工具（高权限，默认建议关闭）
+enable_desktop_control=false
+# 启用屏幕截图工具（用于截图后识图）
+enable_screen_capture=false
+# 启用文件日志（日志目录: ~/.config/minimax/logs/）
+enable_logging=false
+# 启用调试日志
+debug=false
+
+# === 高级设置 ===
+# 最大工具调用轮数 (1-200)
+max_rounds=100
+# 上下文自动摘要阈值 (token 数)。达到该阈值后，旧消息会被自动压缩摘要。
+# 推荐 100000，适合常见的 enable_tools / MCP 编码场景。
+token_limit=100000
+# 工作目录（相对路径基准）
+# 仅影响相对路径、项目级 skills(.agents/skills)、项目级 commands(.minimax/commands)
+# 不影响全局配置和全局知识库；经验库固定存放在 ~/.config/minimax/knowledge/
+# workspace=/path/to/your/project
+# 系统提示词（可选）
+# system_prompt=你是一个专业的编程助手

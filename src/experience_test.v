@@ -1,0 +1,487 @@
+module main
+
+import os
+import time
+
+fn experience_test_dir(prefix string) string {
+	return os.join_path(os.temp_dir(), '${prefix}_${time.now().unix_milli()}')
+}
+
+fn test_parse_experience_json_valid() {
+	payload := '{"skill":"wechat-editor-image","title":"剪贴板插图成功","scenario":"微信公众号编辑器可读写","action":"读取剪贴板图片并注入ProseMirror","outcome":"成功插入图片","tags":"wechat,image,clipboard","confidence":5}'
+	record := parse_experience_json(payload) or {
+		assert false, 'should parse valid experience json'
+		return
+	}
+	assert record.skill_name == 'wechat-editor-image'
+	assert record.title == '剪贴板插图成功'
+	assert record.confidence == 5
+	assert record.action_taken.contains('ProseMirror')
+}
+
+fn test_parse_experience_kv_payload_valid() {
+	payload := 'skill=wechat-editor-image; title=剪贴板插图成功; scenario=编辑器可读写; action=读取剪贴板图片并注入ProseMirror; outcome=成功插入图片; tags=wechat,image,clipboard; confidence=5'
+	record := parse_experience_payload(payload) or {
+		assert false, 'should parse kv experience payload'
+		return
+	}
+	assert record.skill_name == 'wechat-editor-image'
+	assert record.title == '剪贴板插图成功'
+	assert record.confidence == 5
+}
+
+fn test_parse_experience_pipe_payload_valid() {
+	payload := 'wechat-editor-image | 剪贴板插图成功 | 编辑器可读写 | 读取剪贴板图片并注入ProseMirror | 成功插入图片 | wechat,image,clipboard | 5'
+	record := parse_experience_payload(payload) or {
+		assert false, 'should parse pipe experience payload'
+		return
+	}
+	assert record.skill_name == 'wechat-editor-image'
+	assert record.outcome == '成功插入图片'
+	assert record.tags == 'wechat,image,clipboard'
+}
+
+fn test_record_experience_payload_with_paths_writes_sidecars() {
+	base := experience_test_dir('__minimax_experience_store__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'skills')
+	payload := '{"skill":"wechat-editor-image","title":"剪贴板插图成功","scenario":"微信公众号编辑器可读写","action":"读取剪贴板图片并注入ProseMirror","outcome":"成功插入图片","tags":"wechat,image,clipboard","confidence":5}'
+
+	result := record_experience_payload_with_paths(payload, db_path, jsonl_path, markdown_dir)
+	assert result.contains('已记录经验')
+	assert os.is_file(jsonl_path)
+	assert os.is_file(experience_markdown_path('wechat-editor-image', markdown_dir))
+
+	jsonl_content := os.read_file(jsonl_path) or { '' }
+	assert jsonl_content.contains('剪贴板插图成功')
+	assert jsonl_content.contains('wechat-editor-image')
+
+	markdown_content := os.read_file(experience_markdown_path('wechat-editor-image', markdown_dir)) or {
+		''
+	}
+	assert markdown_content.contains('# Experience Notes: wechat-editor-image')
+	assert markdown_content.contains('Scenario: 微信公众号编辑器可读写')
+
+	if sqlite_cli_available() {
+		count := sqlite_exec(db_path, 'SELECT COUNT(*) FROM experiences;') or {
+			assert false, 'sqlite should be readable when sqlite3 exists'
+			return
+		}
+		assert count.trim_space() == '1'
+		records := load_experience_records_from_jsonl(jsonl_path)
+		assert records.len == 1
+		assert records[0].id > 0
+	}
+}
+
+fn test_record_experience_payload_with_paths_accepts_kv_and_pipe_formats() {
+	base := experience_test_dir('__minimax_experience_shortcuts__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'skills')
+	_ = record_experience_payload_with_paths('skill=wechat-editor-image; title=KV 写法; scenario=编辑器可读写; action=直接设置 innerHTML; outcome=正文成功; tags=wechat,kv; confidence=4',
+		db_path, jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('wechat-editor-image | Pipe 写法 | 编辑器可读写 | 直接设置 innerHTML | 正文成功 | wechat,pipe | 5',
+		db_path, jsonl_path, markdown_dir)
+
+	records := load_experience_records_from_jsonl(jsonl_path)
+	assert records.len == 2
+	titles := records.map(it.title)
+	assert 'KV 写法' in titles
+	assert 'Pipe 写法' in titles
+}
+
+fn test_experience_add_wizard_with_scripted_inputs_retries_required_fields() {
+	base := experience_test_dir('__minimax_experience_wizard__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'skills')
+	result := experience_add_wizard_with_scripted_inputs([
+		'',
+		'wechat-editor-image',
+		'',
+		'向导写入成功',
+		'编辑器已加载',
+		'直接设置 innerHTML',
+		'正文成功写入',
+		'wechat,wizard',
+		'',
+	], db_path, jsonl_path, markdown_dir)
+
+	assert result.contains('已记录经验')
+	assert result.contains('title: 向导写入成功')
+	assert result.contains('confidence: 3')
+
+	records := load_experience_records_from_jsonl(jsonl_path)
+	assert records.len == 1
+	assert records[0].skill_name == 'wechat-editor-image'
+	assert records[0].title == '向导写入成功'
+	assert records[0].source == 'wizard'
+	assert records[0].confidence == 3
+}
+
+fn test_experience_add_wizard_with_scripted_inputs_cancel_when_inputs_exhausted() {
+	base := experience_test_dir('__minimax_experience_wizard_cancel__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'skills')
+	result := experience_add_wizard_with_scripted_inputs([
+		'wechat-editor-image',
+	], db_path, jsonl_path, markdown_dir)
+
+	assert result == '已取消'
+	assert !os.is_file(jsonl_path)
+}
+
+fn test_experience_list_and_show_text_with_paths() {
+	base := experience_test_dir('__minimax_experience_list_show__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'skills')
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"列表示例","scenario":"编辑器已完成加载","action":"直接设置 innerHTML","outcome":"正文成功写入","tags":"wechat,editor","confidence":4}',
+		db_path, jsonl_path, markdown_dir)
+	records := load_experience_records_from_jsonl(jsonl_path)
+	assert records.len == 1
+
+	list_text := experience_list_text_with_paths('wechat-editor-image', jsonl_path)
+	assert list_text.contains('列表示例')
+	assert list_text.contains('wechat-editor-image')
+
+	show_target := if records[0].id > 0 { records[0].id.str() } else { '1' }
+	show_text := experience_show_text_with_paths(show_target, jsonl_path)
+	assert show_text.contains('Title: 列表示例')
+	assert show_text.contains('Outcome: 正文成功写入')
+}
+
+fn test_experience_search_text_with_paths_finds_recent_record() {
+	base := experience_test_dir('__minimax_experience_search__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'skills')
+	payload := '{"skill":"wechat-editor-image","title":"Base64 注入成功","scenario":"文件上传被沙箱阻止","action":"改用 Base64 直接创建 img 节点","outcome":"成功显示图片","tags":"wechat,image,base64","confidence":4}'
+	_ = record_experience_payload_with_paths(payload, db_path, jsonl_path, markdown_dir)
+
+	search_result := experience_search_text_with_paths('base64', db_path, jsonl_path)
+	assert search_result.contains('Base64 注入成功')
+	assert search_result.contains('confidence=4') || search_result.contains('置信度')
+}
+
+fn test_sync_skill_from_knowledge_with_paths_creates_skill_file() {
+	base := experience_test_dir('__minimax_skill_sync__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'knowledge')
+	skill_root := os.join_path(base, 'skills-root')
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"剪贴板插图成功","scenario":"编辑器已完成加载","action":"读取剪贴板图片并转Data URL","outcome":"成功插入图片","tags":"wechat,clipboard","confidence":5}',
+		db_path, jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"上传失败后回退","scenario":"setInputFiles 返回 Not allowed","action":"停止重试并提示用户手动上传","outcome":"保留正文内容不回滚","tags":"wechat,upload,fallback","confidence":4}',
+		db_path, jsonl_path, markdown_dir)
+
+	result := sync_skill_from_knowledge_with_paths('wechat-editor-image', 'balanced',
+		skill_root, jsonl_path)
+	assert result.contains('已同步 skill')
+	assert result.contains('mode: balanced')
+
+	skill_path := os.join_path(skill_root, 'wechat-editor-image', 'SKILL.md')
+	assert os.is_file(skill_path)
+	content := os.read_file(skill_path) or { '' }
+	assert content.contains('name: wechat-editor-image')
+	assert content.contains(experience_skill_auto_begin)
+	assert content.contains('## Auto-Generated Operating Rules')
+	assert content.contains('### Preferred Patterns')
+	assert content.contains('### Fallbacks And Avoidance')
+	assert content.contains('剪贴板插图成功')
+	assert content.contains('上传失败后回退')
+}
+
+fn test_sync_skill_from_knowledge_with_paths_updates_existing_block() {
+	base := experience_test_dir('__minimax_skill_sync_update__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	skill_root := os.join_path(base, 'skills-root')
+	os.mkdir_all(os.join_path(skill_root, 'wechat-editor-image')) or {}
+	skill_path := os.join_path(skill_root, 'wechat-editor-image', 'SKILL.md')
+	existing := '---\nname: wechat-editor-image\ndescription: Existing skill\n---\n\nManual intro.\n\n${experience_skill_auto_begin}\nold block\n${experience_skill_auto_end}\n'
+	os.write_file(skill_path, existing) or {
+		assert false
+		return
+	}
+	append_experience_jsonl(ExperienceRecord{
+		skill_name:   'wechat-editor-image'
+		title:        '新的经验'
+		scenario:     '微信编辑器资源加载完成'
+		action_taken: '直接设置 innerHTML 并触发 input'
+		outcome:      '正文成功保存'
+		confidence:   5
+		source:       'manual'
+		created_at:   time.now().unix()
+		updated_at:   time.now().unix()
+	}, jsonl_path) or {
+		assert false
+		return
+	}
+
+	result := sync_skill_from_knowledge_with_paths('wechat-editor-image', 'balanced',
+		skill_root, jsonl_path)
+	assert result.contains('records: 1')
+
+	content := os.read_file(skill_path) or { '' }
+	assert content.contains('Manual intro.')
+	assert content.contains('新的经验')
+	assert content.contains('Preferred Patterns')
+	assert !content.contains('old block')
+}
+
+fn test_build_skill_generated_block_extracts_preferred_and_fallback_rules() {
+	records := [
+		ExperienceRecord{
+			skill_name:   'wechat-editor-image'
+			title:        '剪贴板插图成功'
+			scenario:     '编辑器已完成加载'
+			action_taken: '读取剪贴板图片并转 Data URL 注入 ProseMirror'
+			outcome:      '成功插入图片'
+			tags:         'wechat,clipboard,image'
+			confidence:   5
+		},
+		ExperienceRecord{
+			skill_name:   'wechat-editor-image'
+			title:        '上传失败后回退'
+			scenario:     'setInputFiles 返回 Not allowed'
+			action_taken: '停止重试并提示用户手动上传'
+			outcome:      '保留正文内容不回滚'
+			tags:         'wechat,upload,fallback'
+			confidence:   4
+		},
+	]
+	block := build_skill_generated_block('wechat-editor-image', records, 'balanced')
+	assert block.contains('### Preferred Patterns')
+	assert block.contains('Mode: balanced')
+	assert block.contains('Prefer 读取剪贴板图片并转 Data URL 注入 ProseMirror')
+	assert block.contains('### Fallbacks And Avoidance')
+	assert block.contains('Avoid or fallback when setInputFiles 返回 Not allowed')
+	assert block.contains('### Scenario Signals')
+	assert block.contains('### Useful Tags')
+}
+
+fn test_parse_skill_sync_target_and_mode_supports_prefix_and_suffix_mode() {
+	target1, mode1 := parse_skill_sync_target_and_mode('wechat-editor-image strict')
+	assert target1 == 'wechat-editor-image'
+	assert mode1 == 'strict'
+
+	target2, mode2 := parse_skill_sync_target_and_mode('concise wechat-editor-image')
+	assert target2 == 'wechat-editor-image'
+	assert mode2 == 'concise'
+
+	target3, mode3 := parse_skill_sync_target_and_mode('all')
+	assert target3 == 'all'
+	assert mode3 == 'balanced'
+}
+
+fn test_build_skill_generated_block_modes_adjust_output() {
+	records := [
+		ExperienceRecord{
+			skill_name:   'wechat-editor-image'
+			title:        '高置信成功路径'
+			scenario:     '编辑器已完成加载'
+			action_taken: '读取剪贴板图片并转 Data URL 注入 ProseMirror'
+			outcome:      '成功插入图片'
+			tags:         'wechat,clipboard,image'
+			confidence:   5
+		},
+		ExperienceRecord{
+			skill_name:   'wechat-editor-image'
+			title:        '低置信失败路径'
+			scenario:     'setInputFiles 返回 Not allowed'
+			action_taken: '提示用户手动上传'
+			outcome:      '避免继续重试'
+			tags:         'wechat,upload,fallback'
+			confidence:   4
+		},
+	]
+
+	concise_block := build_skill_generated_block('wechat-editor-image', records, 'concise')
+	assert concise_block.contains('Mode: concise')
+	assert !concise_block.contains('### Scenario Signals')
+	assert !concise_block.contains('### Useful Tags')
+	assert concise_block.contains('### Recent Evidence')
+
+	strict_block := build_skill_generated_block('wechat-editor-image', records, 'strict')
+	assert strict_block.contains('Mode: strict')
+	assert strict_block.contains('高置信成功路径')
+	assert !strict_block.contains('低置信失败路径')
+	assert strict_block.contains('### Scenario Signals')
+	assert strict_block.contains('### Useful Tags')
+	assert !strict_block.contains('### Recent Evidence')
+}
+
+fn test_sync_skill_from_knowledge_with_paths_all_mode_creates_multiple_skill_files() {
+	base := experience_test_dir('__minimax_skill_sync_all_mode__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'knowledge')
+	skill_root := os.join_path(base, 'skills-root')
+
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"微信高置信成功","scenario":"编辑器已完成加载","action":"读取剪贴板图片并转Data URL","outcome":"成功插入图片","tags":"wechat,clipboard","confidence":5}',
+		db_path, jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"微信低置信失败","scenario":"setInputFiles 返回 Not allowed","action":"提示用户手动上传","outcome":"避免继续重试","tags":"wechat,upload","confidence":4}',
+		db_path, jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"browser-ops","title":"浏览器高置信成功","scenario":"页面已稳定加载","action":"等待目标节点后点击","outcome":"操作成功执行","tags":"browser,click","confidence":5}',
+		db_path, jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"browser-ops","title":"浏览器低置信失败","scenario":"元素持续不可见","action":"降级为人工确认","outcome":"保留当前页面状态","tags":"browser,fallback","confidence":4}',
+		db_path, jsonl_path, markdown_dir)
+
+	concise_result := sync_skill_from_knowledge_with_paths('all', 'concise', skill_root,
+		jsonl_path)
+	assert concise_result.contains('已同步 skill: wechat-editor-image')
+	assert concise_result.contains('已同步 skill: browser-ops')
+	assert concise_result.contains('mode: concise')
+
+	wechat_skill_path := os.join_path(skill_root, 'wechat-editor-image', 'SKILL.md')
+	browser_skill_path := os.join_path(skill_root, 'browser-ops', 'SKILL.md')
+	assert os.is_file(wechat_skill_path)
+	assert os.is_file(browser_skill_path)
+
+	wechat_concise := os.read_file(wechat_skill_path) or { '' }
+	browser_concise := os.read_file(browser_skill_path) or { '' }
+	assert wechat_concise.contains('Mode: concise')
+	assert browser_concise.contains('Mode: concise')
+	assert !wechat_concise.contains('### Scenario Signals')
+	assert !browser_concise.contains('### Useful Tags')
+	assert wechat_concise.contains('### Recent Evidence')
+
+	strict_result := sync_skill_from_knowledge_with_paths('all', 'strict', skill_root,
+		jsonl_path)
+	assert strict_result.contains('mode: strict')
+
+	wechat_strict := os.read_file(wechat_skill_path) or { '' }
+	browser_strict := os.read_file(browser_skill_path) or { '' }
+	assert wechat_strict.contains('Mode: strict')
+	assert browser_strict.contains('Mode: strict')
+	assert wechat_strict.contains('微信高置信成功')
+	assert browser_strict.contains('浏览器高置信成功')
+	assert !wechat_strict.contains('微信低置信失败')
+	assert !browser_strict.contains('浏览器低置信失败')
+	assert wechat_strict.contains('### Scenario Signals')
+	assert !wechat_strict.contains('### Recent Evidence')
+	assert !browser_strict.contains('### Recent Evidence')
+}
+
+fn test_sync_skill_from_knowledge_preserves_trailing_content() {
+	base := experience_test_dir('__minimax_skill_sync_suffix__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	skill_root := os.join_path(base, 'skills-root')
+	os.mkdir_all(os.join_path(skill_root, 'wechat-editor-image')) or {}
+	skill_path := os.join_path(skill_root, 'wechat-editor-image', 'SKILL.md')
+	existing := '---\nname: wechat-editor-image\ndescription: Existing skill\n---\n\nManual intro.\n\n${experience_skill_auto_begin}\nold block\n${experience_skill_auto_end}\n\nTrailing notes.\n'
+	os.write_file(skill_path, existing) or {
+		assert false
+		return
+	}
+	append_experience_jsonl(ExperienceRecord{
+		skill_name:   'wechat-editor-image'
+		title:        '保留尾部内容'
+		scenario:     '自动生成区块更新'
+		action_taken: '替换 marker 间内容'
+		outcome:      '尾部补充文案仍然存在'
+		confidence:   4
+		source:       'manual'
+		created_at:   time.now().unix()
+		updated_at:   time.now().unix()
+	}, jsonl_path) or {
+		assert false
+		return
+	}
+
+	_ = sync_skill_from_knowledge_with_paths('wechat-editor-image', 'balanced', skill_root,
+		jsonl_path)
+	content := os.read_file(skill_path) or { '' }
+	assert content.contains('保留尾部内容')
+	assert content.contains('Trailing notes.')
+}
+
+fn test_experience_prune_text_with_paths_by_id() {
+	base := experience_test_dir('__minimax_experience_prune_id__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'skills')
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"保留记录","scenario":"场景A","action":"操作A","outcome":"结果A","tags":"keep","confidence":4}',
+		db_path, jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"删除记录","scenario":"场景B","action":"操作B","outcome":"结果B","tags":"delete","confidence":3}',
+		db_path, jsonl_path, markdown_dir)
+	records := load_experience_records_from_jsonl(jsonl_path)
+	assert records.len == 2
+
+	delete_target := if records[0].title == '删除记录' {
+		experience_record_display_id(records[0], 0).str()
+	} else {
+		experience_record_display_id(records[1], 1).str()
+	}
+	result := experience_prune_text_with_paths(delete_target, db_path, jsonl_path, markdown_dir)
+	assert result.contains('已清理经验记录')
+
+	rest := load_experience_records_from_jsonl(jsonl_path)
+	assert rest.len == 1
+	assert rest[0].title == '保留记录'
+	markdown_content := os.read_file(experience_markdown_path('wechat-editor-image', markdown_dir)) or {
+		''
+	}
+	assert markdown_content.contains('保留记录')
+	assert !markdown_content.contains('删除记录')
+}
+
+fn test_experience_prune_text_with_paths_by_skill() {
+	base := experience_test_dir('__minimax_experience_prune_skill__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'skills')
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"微信经验","scenario":"A","action":"A","outcome":"A","tags":"wechat","confidence":5}',
+		db_path, jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"browser-ops","title":"浏览器经验","scenario":"B","action":"B","outcome":"B","tags":"browser","confidence":4}',
+		db_path, jsonl_path, markdown_dir)
+
+	result := experience_prune_text_with_paths('skill wechat-editor-image', db_path, jsonl_path,
+		markdown_dir)
+	assert result.contains('已清理经验记录')
+
+	rest := load_experience_records_from_jsonl(jsonl_path)
+	assert rest.len == 1
+	assert rest[0].skill_name == 'browser-ops'
+	assert !os.is_file(experience_markdown_path('wechat-editor-image', markdown_dir))
+	assert os.is_file(experience_markdown_path('browser-ops', markdown_dir))
+}

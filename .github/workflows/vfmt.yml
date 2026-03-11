@@ -1,0 +1,32 @@
+name: V Format Check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  vfmt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install V
+        run: |
+          git clone --depth 1 https://github.com/vlang/v /tmp/v
+          if [ -f /tmp/v/make.sh ]; then
+            bash /tmp/v/make.sh
+          elif [ -f /tmp/v/make.bash ]; then
+            bash /tmp/v/make.bash
+          else
+            make -C /tmp/v
+          fi
+          echo "/tmp/v" >> "$GITHUB_PATH"
+
+      - name: Normalize script line endings
+        run: |
+          sed -i 's/\r$//' tests/check_vfmt.sh tests/build.sh
+          chmod +x tests/check_vfmt.sh tests/build.sh
+
+      - name: Verify formatting
+        run: bash ./tests/check_vfmt.sh
