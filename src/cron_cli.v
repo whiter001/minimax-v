@@ -23,7 +23,7 @@ fn is_cron_cli_subcommand(args []string) bool {
 }
 
 fn cron_storage_path() string {
-	return os.join_path(os.home_dir(), '.config', 'minimax', 'cron')
+	return os.join_path(get_minimax_config_dir(), 'cron')
 }
 
 fn cron_logs_path() string {
@@ -66,11 +66,23 @@ fn execute_cron_job_shell(command string) (string, int) {
 		} else {
 			bash_path
 		}
-		result := os.execute('${shell_escape(actual_bash)} -lc ${shell_escape(command)}')
-		return result.output, result.exit_code
+		mut proc := os.new_process(actual_bash)
+		proc.set_args(['-lc', command])
+		proc.use_stdio_ctl = true
+		proc.run()
+		mut output := proc.stdout_slurp()
+		output += proc.stderr_slurp()
+		proc.wait()
+		return output, proc.code
 	}
-	result := os.execute('cmd /c ${shell_escape_windows(command)}')
-	return result.output, result.exit_code
+	mut proc := os.new_process('cmd')
+	proc.set_args(['/c', command])
+	proc.use_stdio_ctl = true
+	proc.run()
+	mut output := proc.stdout_slurp()
+	output += proc.stderr_slurp()
+	proc.wait()
+	return output, proc.code
 }
 
 fn execute_cron_job(job CronJob) ! {

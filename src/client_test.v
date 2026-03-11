@@ -178,6 +178,85 @@ fn test_build_assistant_content_json_with_tool_use() {
 	assert json.contains('"time":1')
 }
 
+fn test_build_parsed_response_from_stream_result_preserves_text_and_thinking() {
+	sr := StreamResult{
+		text:     'final text'
+		thinking: 'deep thoughts'
+		raw_body: ''
+	}
+	parsed := build_parsed_response_from_stream_result(sr)
+	assert parsed.text == 'final text'
+	assert parsed.thinking == 'deep thoughts'
+	assert parsed.stop_reason == ''
+}
+
+fn test_store_assistant_response_with_tool_use_builds_content_json() {
+	mut client := new_api_client(default_config())
+	parsed := ParsedResponse{
+		text:      'hello'
+		thinking:  'thinking'
+		tool_uses: [
+			ToolUse{
+				id:    'tu_1'
+				name:  'browser_wait_for'
+				input: {
+					'time': '1'
+				}
+			},
+		]
+	}
+	client.store_assistant_response(parsed)
+	assert client.messages.len == 1
+	assert client.messages[0].role == 'assistant'
+	assert client.messages[0].content == 'hello'
+	assert client.messages[0].content_json.contains('"type":"tool_use"')
+}
+
+fn test_store_assistant_response_plain_text_falls_back_to_content() {
+	mut client := new_api_client(default_config())
+	parsed := ParsedResponse{
+		text:             'plain reply'
+		raw_content_json: ''
+	}
+	client.store_assistant_response(parsed)
+	assert client.messages.len == 1
+	assert client.messages[0].content == 'plain reply'
+	assert client.messages[0].content_json == ''
+}
+
+fn test_finalize_successful_round_updates_step_and_message() {
+	mut client := new_api_client(default_config())
+	mut step := AgentStep{}
+	parsed := ParsedResponse{
+		text:     'assistant reply'
+		thinking: 'analysis'
+	}
+	client.finalize_successful_round(mut step, parsed)
+	assert step.thought == 'assistant reply'
+	assert step.thinking == 'analysis'
+	assert client.messages.len == 1
+	assert client.messages[0].content == 'assistant reply'
+}
+
+fn test_complete_task_done_updates_execution_and_messages() {
+	mut client := new_api_client(default_config())
+	mut step := AgentStep{
+		step_number: 1
+		state:       .calling_tool
+		start_time:  1
+	}
+	mut execution := new_agent_execution('task')
+	result := client.complete_task_done(mut step, mut execution, 'done summary')
+	assert result == 'done summary'
+	assert step.state == .completed
+	assert execution.success
+	assert execution.agent_state == .completed
+	assert execution.final_result == 'done summary'
+	assert client.messages.len == 1
+	assert client.messages[0].role == 'assistant'
+	assert client.messages[0].content == 'done summary'
+}
+
 fn test_sanitize_messages_for_api_keeps_valid_tool_pair() {
 	messages := [
 		ChatMessage{

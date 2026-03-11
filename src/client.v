@@ -1,7 +1,6 @@
 module main
 
 import net.http
-import os
 import sync.stdatomic
 import time
 
@@ -10,7 +9,6 @@ const max_tool_output_chars = 10000
 const tool_failure_escalation_round = 3
 const repeated_failed_tool_batch_limit = 3
 const repeated_failed_bash_command_limit = 3
-const large_body_fallback_threshold = 200000
 const default_agent_prompt = 'You are a helpful AI assistant with access to tools for reading files, writing files, listing directories, and running shell commands.
 
 Guidelines:
@@ -644,26 +642,234 @@ fn tool_phase_message(tool ToolUse) string {
 	}
 }
 
+fn (mut c ApiClient) handle_chat_request_retry(mut step AgentStep, mut execution AgentExecution, consecutive_errors int, err_prefix string, err_msg string) !int {
+	mut next_errors := consecutive_errors + 1
+	step.state = .error
+	step.error_msg = '${err_prefix}: ${err_msg}'
+	step.end_time = time.now().unix_milli()
+	c.trajectory.record_step(step)
+	execution.steps << step
+	c.logger.log_error('API', '${err_prefix} (attempt ${next_errors}): ${err_msg}')
+	if next_errors >= 3 {
+		execution.agent_state = .error
+		execution.end_time = time.now().unix_milli()
+		c.trajectory.finalize(false, 'API 连续失败 ${next_errors} 次')
+		return error('API 连续失败 ${next_errors} 次: ${err_msg}')
+	}
+	if !c.silent_mode {
+		println('\x1b[33m⚠️  请求失败，${next_errors}s 后重试 (${next_errors}/3)...\x1b[0m')
+	}
+	time.sleep(next_errors * time.second)
+	return next_errors
+}
+
+fn (c ApiClient) log_cache_stats_if_debug(response_body string) {
+	if c.debug && !c.silent_mode {
+		cr, cc := parse_cache_stats(response_body)
+		if cr > 0 || cc > 0 {
+			println('[Cache] 命中=${cr} tokens  新写入=${cc} tokens')
+		}
+	}
+}
+
+fn build_parsed_response_from_stream_result(sr StreamResult) ParsedResponse {
+	mut parsed := parse_sse_full(sr.raw_body)
+	parsed.text = sr.text
+	parsed.thinking = sr.thinking
+	return parsed
+}
+
+fn (c ApiClient) parse_non_streaming_response(response_body string) ParsedResponse {
+	parsed := parse_response_full(response_body)
+	c.log_cache_stats_if_debug(response_body)
+	return parsed
+}
+
+fn (c ApiClient) parse_text_response(response_body string) string {
+	full_response := parse_anthropic_response(response_body)
+	c.log_cache_stats_if_debug(response_body)
+	return full_response
+}
+
+fn (mut c ApiClient) log_parsed_thinking_if_needed(parsed ParsedResponse) {
+	if !c.use_streaming && parsed.thinking.len > 0 {
+		if term_ui_is_active() {
+			term_ui_append_thinking(parsed.thinking)
+		} else if !c.silent_mode {
+			clear_phase_status_line()
+			println('\x1b[92m🧠 Thinking: ${parsed.thinking}\x1b[0m')
+		}
+		c.logger.log('INFO', 'THINKING', parsed.thinking.replace('\n', '\\n'))
+	}
+}
+
+fn (mut c ApiClient) store_assistant_response(parsed ParsedResponse) {
+	assistant_content_json := if parsed.tool_uses.len > 0 {
+		build_assistant_content_json(parsed.text, parsed.thinking, parsed.tool_uses)
+	} else {
+		parsed.raw_content_json
+	}
+	if assistant_content_json.len > 0 {
+		c.messages << ChatMessage{
+			role:         'assistant'
+			content:      parsed.text
+			content_json: assistant_content_json
+		}
+	} else {
+		c.add_message('assistant', parsed.text)
+	}
+}
+
+fn (mut c ApiClient) finalize_successful_round(mut step AgentStep, parsed ParsedResponse) {
+	step.thought = parsed.text
+	step.thinking = parsed.thinking
+	c.log_parsed_thinking_if_needed(parsed)
+	c.logger.log_response(parsed.stop_reason, parsed.text.len, parsed.tool_uses.len, parsed.thinking.len)
+	c.logger.log_ai_response(parsed.text, false)
+	c.store_assistant_response(parsed)
+}
+
+struct ToolRoundExecutionResult {
+	results_json               string
+	tool_results               []string
+	tool_names                 []string
+	task_done_result           string
+	round_has_tool_errors      bool
+	round_all_tool_errors      bool
+	last_failed_bash_command   string
+	failed_bash_command_streak int
+}
+
+fn (mut c ApiClient) block_repeated_failed_tool_batch(mut step AgentStep, mut execution AgentExecution, tools []ToolUse, message string) {
+	step.state = .error
+	step.error_msg = 'repeated failed tool batch blocked'
+	step.tool_calls = tools
+	step.tool_results = [message]
+	step.end_time = time.now().unix_milli()
+	print_step_status(step)
+	c.trajectory.record_step(step)
+	execution.steps << step
+	c.messages << ChatMessage{
+		role:         'user'
+		content:      ''
+		content_json: build_tool_error_results_json(tools, message)
+	}
+	c.add_message('user', 'SYSTEM: 不要再次执行相同且已连续失败的工具调用。必须更换策略、修改参数，或先总结现状。')
+}
+
+fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tools []ToolUse, last_failed_bash_command string, failed_bash_command_streak int) ToolRoundExecutionResult {
+	mut results_json := '['
+	mut tool_results := []string{}
+	mut tool_names := []string{}
+	mut task_done_result := ''
+	mut next_last_failed_bash_command := last_failed_bash_command
+	mut next_failed_bash_command_streak := failed_bash_command_streak
+	for tu in tools {
+		c.logger.log_tool_call(tu.name, tu.input.keys().str())
+		c.logger.log_tool_input(tu.name, tu.input)
+		tool_start_ms := time.now().unix_milli()
+		tool_detail := summarize_tool_timing_detail(tu)
+		c.print_phase_status(tool_phase_message(tu), tool_detail)
+		c.logger.log_phase_start('tool.execute', 'step=${step.step_number} round=${tool_round} name=${tu.name} ${tool_detail}')
+		mut raw_result := ''
+		if should_block_repeated_failed_bash_command(tu, next_last_failed_bash_command,
+			next_failed_bash_command_streak)
+		{
+			raw_result = 'Error: 检测到相同的 bash 失败命令已连续重复，已阻止再次执行。请先修改命令、检查路径或权限，或改用其他工具。'
+			c.logger.log('WARN', 'TOOL_GUARD', 'blocked repeated failed bash command')
+		} else {
+			raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, tu, c.workspace)
+		}
+		c.logger.log_phase_end('tool.execute', time.now().unix_milli() - tool_start_ms,
+			'step=${step.step_number} round=${tool_round} name=${tu.name} ${tool_detail}')
+		if tu.name == 'bash' {
+			normalized_command := normalize_tool_command(tu.input['command'] or { '' })
+			if is_tool_error_result(raw_result) && normalized_command.len > 0 {
+				if normalized_command == next_last_failed_bash_command {
+					next_failed_bash_command_streak++
+				} else {
+					next_last_failed_bash_command = normalized_command
+					next_failed_bash_command_streak = 1
+				}
+			} else if normalized_command == next_last_failed_bash_command {
+				next_last_failed_bash_command = ''
+				next_failed_bash_command_streak = 0
+			}
+		}
+		if raw_result.starts_with('__TASK_DONE__:') {
+			task_done_result = raw_result[14..]
+			print_tool_result(tu.name, task_done_result)
+			tool_results << task_done_result
+			tool_names << tu.name
+		} else {
+			print_tool_result(tu.name, raw_result)
+			tool_results << raw_result
+			tool_names << tu.name
+		}
+		is_truncated := raw_result.len > max_tool_output_chars
+		result := if is_truncated {
+			utf8_safe_truncate(raw_result, max_tool_output_chars) +
+				'\n\n[... truncated, ${raw_result.len - max_tool_output_chars} chars omitted]'
+		} else {
+			raw_result
+		}
+		c.logger.log_tool_result(tu.name, raw_result.len, is_truncated)
+		c.logger.log_tool_result_detail(tu.name, raw_result)
+		escaped := escape_json_string(result)
+		results_json += '{"type":"tool_result","tool_use_id":"${tu.id}","content":"${escaped}"},'
+	}
+	if results_json.ends_with(',') {
+		results_json = results_json[..results_json.len - 1]
+	}
+	results_json += ']'
+	mut round_has_tool_errors := false
+	mut round_all_tool_errors := tool_results.len > 0
+	for tr in tool_results {
+		if is_tool_error_result(tr) {
+			round_has_tool_errors = true
+		} else {
+			round_all_tool_errors = false
+		}
+	}
+	return ToolRoundExecutionResult{
+		results_json:               results_json
+		tool_results:               tool_results
+		tool_names:                 tool_names
+		task_done_result:           task_done_result
+		round_has_tool_errors:      round_has_tool_errors
+		round_all_tool_errors:      round_all_tool_errors
+		last_failed_bash_command:   next_last_failed_bash_command
+		failed_bash_command_streak: next_failed_bash_command_streak
+	}
+}
+
+fn (mut c ApiClient) complete_task_done(mut step AgentStep, mut execution AgentExecution, task_done_result string) string {
+	step.state = .completed
+	step.end_time = time.now().unix_milli()
+	print_step_status(step)
+	c.trajectory.record_step(step)
+	execution.steps << step
+	execution.final_result = task_done_result
+	execution.success = true
+	execution.agent_state = .completed
+	execution.end_time = time.now().unix_milli()
+	c.trajectory.finalize(true, task_done_result)
+	if term_ui_is_active() {
+		term_ui_add_activity('Agent 完成任务')
+	} else if !c.silent_mode {
+		println('\x1b[32m✅ Agent 完成任务\x1b[0m')
+	}
+	c.add_message('assistant', task_done_result)
+	return task_done_result
+}
+
 fn (c ApiClient) send_api_request(body_json string) !string {
 	start_ms := time.now().unix_milli()
-	request_mode := if body_json.len > large_body_fallback_threshold { 'sync-large' } else { 'sync' }
+	request_mode := 'sync'
 	c.logger.log_phase_start('api.request', 'mode=${request_mode} bytes=${body_json.len}')
 	c.print_phase_status('等待模型', 'mode=${request_mode}, body=${body_json.len} bytes')
 	if c.debug && !c.silent_mode {
 		println('[DEBUG] 发送请求... body=${body_json.len} bytes')
-	}
-
-	// V's vschannel SSL crashes on Windows with large payloads (>16KB).
-	// Use PowerShell Invoke-WebRequest as a reliable fallback for very large bodies.
-	if body_json.len > large_body_fallback_threshold {
-		response_body := c.send_api_request_large(body_json) or {
-			c.logger.log_error('API', 'phase=api.request mode=${request_mode} duration_ms=${time.now().unix_milli() - start_ms} err=${err}')
-			clear_phase_status_line()
-			return err
-		}
-		c.logger.log_phase_end('api.request', time.now().unix_milli() - start_ms, 'mode=${request_mode} bytes=${body_json.len} status=200 body_bytes=${response_body.len}')
-		clear_phase_status_line()
-		return response_body
 	}
 
 	mut headers := http.new_header()
@@ -695,59 +901,6 @@ fn (c ApiClient) send_api_request(body_json string) !string {
 	clear_phase_status_line()
 
 	return response.body
-}
-
-// send_api_request_large uses PowerShell Invoke-WebRequest to handle large payloads
-// that exceed V's vschannel SSL buffer limits on Windows (max ~16KB per TLS record).
-// PowerShell uses the Windows certificate store, supporting corporate proxies.
-fn (c ApiClient) send_api_request_large(body_json string) !string {
-	ts := time.now().unix_milli()
-	tmp_body := os.join_path(os.temp_dir(), 'minimax_req_${ts}.json')
-	tmp_resp := os.join_path(os.temp_dir(), 'minimax_resp_${ts}.json')
-	tmp_ps := os.join_path(os.temp_dir(), 'minimax_req_${ts}.ps1')
-
-	os.write_file(tmp_body, body_json) or {
-		return error('Failed to write temp request file: ${err}')
-	}
-	defer {
-		os.rm(tmp_body) or {}
-		os.rm(tmp_resp) or {}
-		os.rm(tmp_ps) or {}
-	}
-
-	// Write PowerShell script to a file to avoid quoting issues on the command line.
-	// Use ReadAllBytes to send raw UTF-8 bytes directly — passing a .NET String to
-	// Invoke-WebRequest encodes it with the system default codepage (not UTF-8),
-	// which corrupts multi-byte characters (e.g. Chinese) and makes the API reject
-	// the request with "invalid params".
-	ps_script := r'$ErrorActionPreference = "Stop"
-$headers = @{ "Authorization" = "Bearer ' +
-		c.api_key +
-		r'"; "Content-Type" = "application/json; charset=utf-8" }
-$bodyBytes = [System.IO.File]::ReadAllBytes("' +
-		tmp_body + r'")
-$resp = Invoke-WebRequest -Uri "' + c.api_url +
-		r'" -Method POST -Headers $headers -Body $bodyBytes -TimeoutSec 180 -UseBasicParsing
-[System.IO.File]::WriteAllText("' +
-		tmp_resp + r'", $resp.Content, [System.Text.Encoding]::UTF8)'
-
-	os.write_file(tmp_ps, ps_script) or {
-		return error('Failed to write PowerShell script: ${err}')
-	}
-
-	result := os.execute('pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${tmp_ps}"')
-	if result.exit_code != 0 {
-		return error('PowerShell request failed (exit ${result.exit_code}): ${result.output}')
-	}
-
-	response := os.read_file(tmp_resp) or { return error('Failed to read response: ${err}') }
-
-	// Check for HTTP error in response body (PowerShell doesn't throw on 4xx/5xx with -UseBasicParsing by default)
-	if response.contains('"error"') && !response.contains('"type"') {
-		return error('API Error: ${response}')
-	}
-
-	return response
 }
 
 fn (c ApiClient) send_streaming_request(body_json string) !StreamResult {
@@ -1061,13 +1214,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			return sr.text
 		}
 		response_body := c.send_api_request(body_json)!
-		full_response := parse_anthropic_response(response_body)
-		if c.debug && !c.silent_mode {
-			cr, cc := parse_cache_stats(response_body)
-			if cr > 0 || cc > 0 {
-				println('[Cache] 命中=${cr} tokens  新写入=${cc} tokens')
-			}
-		}
+		full_response := c.parse_text_response(response_body)
 		c.add_message('assistant', full_response)
 		return full_response
 	}
@@ -1106,11 +1253,8 @@ fn (mut c ApiClient) chat(prompt string) !string {
 		mut parsed := ParsedResponse{}
 
 		// When tool rounds are in progress, use streaming internally for reliability.
-		// The MiniMax API closes non-streaming connections unreliably for large multi-round requests.
-		// Exception: skip forced streaming for large bodies - the non-streaming path handles them
-		// via PowerShell fallback which avoids V's vschannel SSL size limit.
+		// The MiniMax API closes non-streaming connections unreliably for multi-round requests.
 		force_stream := !c.use_streaming && tool_rounds > 0
-			&& body_json.len <= large_body_fallback_threshold
 		if c.use_streaming || force_stream {
 			mut stream_body := body_json
 			if force_stream {
@@ -1122,51 +1266,19 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			if force_stream {
 				sr = c.send_streaming_request_silent(stream_body) or {
 					c.use_streaming = false
-					consecutive_errors++
-					step.state = .error
-					step.error_msg = 'streaming request failed: ${err}'
-					step.end_time = time.now().unix_milli()
-					c.trajectory.record_step(step)
-					execution.steps << step
-					c.logger.log_error('API', 'streaming request failed (attempt ${consecutive_errors}): ${err}')
-					if consecutive_errors >= 3 {
-						execution.agent_state = .error
-						execution.end_time = time.now().unix_milli()
-						c.trajectory.finalize(false, 'API 连续失败 ${consecutive_errors} 次')
-						return error('API 连续失败 ${consecutive_errors} 次: ${err}')
-					}
-					if !c.silent_mode {
-						println('\x1b[33m⚠️  请求失败，${consecutive_errors}s 后重试 (${consecutive_errors}/3)...\x1b[0m')
-					}
-					time.sleep(consecutive_errors * time.second)
+					consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
+						consecutive_errors, 'streaming request failed', err.str()) or { return err }
 					continue
 				}
 				c.use_streaming = false
 			} else {
 				sr = c.send_streaming_request(stream_body) or {
-					consecutive_errors++
-					step.state = .error
-					step.error_msg = 'streaming request failed: ${err}'
-					step.end_time = time.now().unix_milli()
-					c.trajectory.record_step(step)
-					execution.steps << step
-					c.logger.log_error('API', 'streaming request failed (attempt ${consecutive_errors}): ${err}')
-					if consecutive_errors >= 3 {
-						execution.agent_state = .error
-						execution.end_time = time.now().unix_milli()
-						c.trajectory.finalize(false, 'API 连续失败 ${consecutive_errors} 次')
-						return error('API 连续失败 ${consecutive_errors} 次: ${err}')
-					}
-					if !c.silent_mode {
-						println('\x1b[33m⚠️  请求失败，${consecutive_errors}s 后重试 (${consecutive_errors}/3)...\x1b[0m')
-					}
-					time.sleep(consecutive_errors * time.second)
+					consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
+						consecutive_errors, 'streaming request failed', err.str()) or { return err }
 					continue
 				}
 			}
-			parsed = parse_sse_full(sr.raw_body)
-			parsed.text = sr.text
-			parsed.thinking = sr.thinking
+			parsed = build_parsed_response_from_stream_result(sr)
 			if force_stream && parsed.stop_reason.len == 0 && parsed.text.len == 0
 				&& parsed.tool_uses.len == 0 {
 				if c.debug && !c.silent_mode {
@@ -1175,62 +1287,20 @@ fn (mut c ApiClient) chat(prompt string) !string {
 				c.logger.log_error('API', 'forced streaming returned empty parsed response, retrying non-streaming')
 				c.logger.log_request(c.model, c.messages.len, true, false)
 				response_body := c.send_api_request(body_json) or {
-					consecutive_errors++
-					step.state = .error
-					step.error_msg = 'request failed: ${err}'
-					step.end_time = time.now().unix_milli()
-					c.trajectory.record_step(step)
-					execution.steps << step
-					c.logger.log_error('API', 'request failed (attempt ${consecutive_errors}): ${err}')
-					if consecutive_errors >= 3 {
-						execution.agent_state = .error
-						execution.end_time = time.now().unix_milli()
-						c.trajectory.finalize(false, 'API 连续失败 ${consecutive_errors} 次')
-						return error('API 连续失败 ${consecutive_errors} 次: ${err}')
-					}
-					if !c.silent_mode {
-						println('\x1b[33m⚠️  请求失败，${consecutive_errors}s 后重试 (${consecutive_errors}/3)...\x1b[0m')
-					}
-					time.sleep(consecutive_errors * time.second)
+					consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
+						consecutive_errors, 'request failed', err.str()) or { return err }
 					continue
 				}
-				parsed = parse_response_full(response_body)
-				if c.debug && !c.silent_mode {
-					cr, cc := parse_cache_stats(response_body)
-					if cr > 0 || cc > 0 {
-						println('[Cache] 命中=${cr} tokens  新写入=${cc} tokens')
-					}
-				}
+				parsed = c.parse_non_streaming_response(response_body)
 			}
 		} else {
 			c.logger.log_request(c.model, c.messages.len, true, false)
 			response_body := c.send_api_request(body_json) or {
-				consecutive_errors++
-				step.state = .error
-				step.error_msg = 'request failed: ${err}'
-				step.end_time = time.now().unix_milli()
-				c.trajectory.record_step(step)
-				execution.steps << step
-				c.logger.log_error('API', 'request failed (attempt ${consecutive_errors}): ${err}')
-				if consecutive_errors >= 3 {
-					execution.agent_state = .error
-					execution.end_time = time.now().unix_milli()
-					c.trajectory.finalize(false, 'API 连续失败 ${consecutive_errors} 次')
-					return error('API 连续失败 ${consecutive_errors} 次: ${err}')
-				}
-				if !c.silent_mode {
-					println('\x1b[33m⚠️  请求失败，${consecutive_errors}s 后重试 (${consecutive_errors}/3)...\x1b[0m')
-				}
-				time.sleep(consecutive_errors * time.second)
+				consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
+					consecutive_errors, 'request failed', err.str()) or { return err }
 				continue
 			}
-			parsed = parse_response_full(response_body)
-			if c.debug && !c.silent_mode {
-				cr, cc := parse_cache_stats(response_body)
-				if cr > 0 || cc > 0 {
-					println('[Cache] 命中=${cr} tokens  新写入=${cc} tokens')
-				}
-			}
+			parsed = c.parse_non_streaming_response(response_body)
 		}
 
 		// Reset consecutive errors on success
@@ -1241,40 +1311,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			c.logger.log('WARN', 'TOOL_INPUT', 'normalized tool input with safe defaults')
 		}
 
-		// Update step with response
-		step.thought = parsed.text
-		step.thinking = parsed.thinking
-
-		// Display thinking if present (non-streaming only)
-		if !c.use_streaming && parsed.thinking.len > 0 {
-			if term_ui_is_active() {
-				term_ui_append_thinking(parsed.thinking)
-			} else if !c.silent_mode {
-				clear_phase_status_line()
-				println('\x1b[92m🧠 Thinking: ${parsed.thinking}\x1b[0m')
-			}
-			c.logger.log('INFO', 'THINKING', parsed.thinking.replace('\n', '\\n'))
-		}
-
-		c.logger.log_response(parsed.stop_reason, parsed.text.len, parsed.tool_uses.len,
-			parsed.thinking.len)
-		c.logger.log_ai_response(parsed.text, false)
-
-		// Store assistant message
-		assistant_content_json := if parsed.tool_uses.len > 0 {
-			build_assistant_content_json(parsed.text, parsed.thinking, parsed.tool_uses)
-		} else {
-			parsed.raw_content_json
-		}
-		if assistant_content_json.len > 0 {
-			c.messages << ChatMessage{
-				role:         'assistant'
-				content:      parsed.text
-				content_json: assistant_content_json
-			}
-		} else {
-			c.add_message('assistant', parsed.text)
-		}
+		c.finalize_successful_round(mut step, parsed)
 
 		// Check for tool use
 		if parsed.tool_uses.len > 0 && tool_rounds < effective_max {
@@ -1283,109 +1320,25 @@ fn (mut c ApiClient) chat(prompt string) !string {
 				&& current_tool_batch_signature == last_failed_tool_batch_signature {
 				block_message := '检测到连续重复的相同工具调用且前几轮全部失败，已阻止再次执行。请调整参数、先检查环境，或直接总结当前结果。'
 				tool_rounds++
-				step.state = .error
-				step.error_msg = 'repeated failed tool batch blocked'
-				step.tool_calls = parsed.tool_uses
-				step.tool_results = [block_message]
-				step.end_time = time.now().unix_milli()
-				print_step_status(step)
-				c.trajectory.record_step(step)
-				execution.steps << step
-				c.messages << ChatMessage{
-					role:         'user'
-					content:      ''
-					content_json: build_tool_error_results_json(parsed.tool_uses, block_message)
-				}
-				c.add_message('user', 'SYSTEM: 不要再次执行相同且已连续失败的工具调用。必须更换策略、修改参数，或先总结现状。')
+				c.block_repeated_failed_tool_batch(mut step, mut execution, parsed.tool_uses,
+					block_message)
 				continue
 			}
 
 			step.state = .calling_tool
 			step.tool_calls = parsed.tool_uses
 			tool_rounds++
-
-			// Execute each tool and build tool_result messages
-			mut results_json := '['
-			mut tool_results := []string{}
-			mut tool_names := []string{}
-			mut task_done_result := ''
-			for tu in parsed.tool_uses {
-				c.logger.log_tool_call(tu.name, tu.input.keys().str())
-				c.logger.log_tool_input(tu.name, tu.input)
-				tool_start_ms := time.now().unix_milli()
-				tool_detail := summarize_tool_timing_detail(tu)
-				c.print_phase_status(tool_phase_message(tu), tool_detail)
-				c.logger.log_phase_start('tool.execute', 'step=${step.step_number} round=${tool_rounds} name=${tu.name} ${tool_detail}')
-				mut raw_result := ''
-				if should_block_repeated_failed_bash_command(tu, last_failed_bash_command,
-					failed_bash_command_streak)
-				{
-					raw_result = 'Error: 检测到相同的 bash 失败命令已连续重复，已阻止再次执行。请先修改命令、检查路径或权限，或改用其他工具。'
-					c.logger.log('WARN', 'TOOL_GUARD', 'blocked repeated failed bash command')
-				} else {
-					raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, tu, c.workspace)
-				}
-				c.logger.log_phase_end('tool.execute', time.now().unix_milli() - tool_start_ms,
-					'step=${step.step_number} round=${tool_rounds} name=${tu.name} ${tool_detail}')
-				if tu.name == 'bash' {
-					normalized_command := normalize_tool_command(tu.input['command'] or { '' })
-					if is_tool_error_result(raw_result) && normalized_command.len > 0 {
-						if normalized_command == last_failed_bash_command {
-							failed_bash_command_streak++
-						} else {
-							last_failed_bash_command = normalized_command
-							failed_bash_command_streak = 1
-						}
-					} else if normalized_command == last_failed_bash_command {
-						last_failed_bash_command = ''
-						failed_bash_command_streak = 0
-					}
-				}
-				// Detect task_done signal
-				if raw_result.starts_with('__TASK_DONE__:') {
-					task_done_result = raw_result[14..]
-					print_tool_result(tu.name, task_done_result)
-					tool_results << task_done_result
-					tool_names << tu.name
-				} else {
-					print_tool_result(tu.name, raw_result)
-					tool_results << raw_result
-					tool_names << tu.name
-				}
-				// Truncate large outputs (use UTF-8 safe truncation so we never split a multi-byte character)
-				is_truncated := raw_result.len > max_tool_output_chars
-				result := if is_truncated {
-					utf8_safe_truncate(raw_result, max_tool_output_chars) +
-						'\n\n[... truncated, ${raw_result.len - max_tool_output_chars} chars omitted]'
-				} else {
-					raw_result
-				}
-				c.logger.log_tool_result(tu.name, raw_result.len, is_truncated)
-				c.logger.log_tool_result_detail(tu.name, raw_result)
-				escaped := escape_json_string(result)
-				results_json += '{"type":"tool_result","tool_use_id":"${tu.id}","content":"${escaped}"},'
-			}
-			if results_json.ends_with(',') {
-				results_json = results_json[..results_json.len - 1]
-			}
-			results_json += ']'
-
-			step.tool_results = tool_results
-			mut round_has_tool_errors := false
-			mut round_all_tool_errors := tool_results.len > 0
-			for tr in tool_results {
-				if is_tool_error_result(tr) {
-					round_has_tool_errors = true
-				} else {
-					round_all_tool_errors = false
-				}
-			}
-			if round_has_tool_errors {
+			tool_round_result := c.execute_tool_batch(mut step, tool_rounds, parsed.tool_uses,
+				last_failed_bash_command, failed_bash_command_streak)
+			last_failed_bash_command = tool_round_result.last_failed_bash_command
+			failed_bash_command_streak = tool_round_result.failed_bash_command_streak
+			step.tool_results = tool_round_result.tool_results
+			if tool_round_result.round_has_tool_errors {
 				consecutive_tool_failure_rounds++
 			} else {
 				consecutive_tool_failure_rounds = 0
 			}
-			if round_all_tool_errors {
+			if tool_round_result.round_all_tool_errors {
 				if current_tool_batch_signature == last_failed_tool_batch_signature {
 					failed_tool_batch_streak++
 				} else {
@@ -1398,29 +1351,12 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			}
 
 			// task_done: early exit if agent signaled completion
-			if task_done_result.len > 0 {
-				step.state = .completed
-				step.end_time = time.now().unix_milli()
-				print_step_status(step)
-				c.trajectory.record_step(step)
-				execution.steps << step
-				execution.final_result = task_done_result
-				execution.success = true
-				execution.agent_state = .completed
-				execution.end_time = time.now().unix_milli()
-				c.trajectory.finalize(true, task_done_result)
-				if term_ui_is_active() {
-					term_ui_add_activity('Agent 完成任务')
-				} else if !c.silent_mode {
-					println('\x1b[32m✅ Agent 完成任务\x1b[0m')
-				}
-				// Add the task_done result as assistant message
-				c.add_message('assistant', task_done_result)
-				return task_done_result
+			if tool_round_result.task_done_result.len > 0 {
+				return c.complete_task_done(mut step, mut execution, tool_round_result.task_done_result)
 			}
 
 			// Reflection: check for tool errors and generate reflection message
-			reflection := generate_reflection(tool_results, tool_names)
+			reflection := generate_reflection(tool_round_result.tool_results, tool_round_result.tool_names)
 			if reflection.len > 0 {
 				step.state = .reflecting
 				step.reflection = reflection
@@ -1437,10 +1373,10 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			c.messages << ChatMessage{
 				role:         'user'
 				content:      ''
-				content_json: results_json
+				content_json: tool_round_result.results_json
 			}
 			// Failure escalation: after repeated tool failures, force user handoff in interactive mode.
-			if round_has_tool_errors {
+			if tool_round_result.round_has_tool_errors {
 				if consecutive_tool_failure_rounds == 2 {
 					c.add_message('user', 'SYSTEM: 连续两轮工具执行失败。请先探测环境状态并避免重复同样参数。')
 				} else if consecutive_tool_failure_rounds >= tool_failure_escalation_round {
@@ -1450,10 +1386,10 @@ fn (mut c ApiClient) chat(prompt string) !string {
 						if user_guidance.len > 0 && !user_guidance.starts_with('Error:')
 							&& user_guidance != '(User provided no answer)' {
 							c.add_message('user', 'User guidance (failure escalation): ${user_guidance}')
-						} else if round_all_tool_errors {
+						} else if tool_round_result.round_all_tool_errors {
 							c.add_message('user', 'SYSTEM: 多轮工具全部失败，请先调用 ask_user 澄清需求后再继续。')
 						}
-					} else if round_all_tool_errors {
+					} else if tool_round_result.round_all_tool_errors {
 						c.add_message('user', 'SYSTEM: 多轮工具全部失败，请先调用 ask_user 澄清需求后再继续。')
 					}
 					consecutive_tool_failure_rounds = 0
@@ -1502,7 +1438,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			// One final request for summary
 			final_body := c.build_request_json()
 			final_resp := c.send_api_request(final_body)!
-			final_parsed := parse_response_full(final_resp)
+			final_parsed := c.parse_non_streaming_response(final_resp)
 			if final_parsed.text.len > 0 {
 				c.add_message('assistant', final_parsed.text)
 				execution.final_result = final_parsed.text

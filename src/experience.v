@@ -76,12 +76,17 @@ fn sqlite_exec(db_path string, statement string) !string {
 		return error('sqlite3 不可用')
 	}
 	os.mkdir_all(os.dir(db_path)) or {}
-	cmd := '${shell_escape(sqlite_path)} ${shell_escape(db_path)} ${shell_escape(statement)}'
-	result := os.execute(cmd)
-	if result.exit_code != 0 {
-		return error(result.output.trim_space())
+	mut proc := os.new_process(sqlite_path)
+	proc.set_args([db_path, statement])
+	proc.use_stdio_ctl = true
+	proc.run()
+	mut output := proc.stdout_slurp()
+	output += proc.stderr_slurp()
+	proc.wait()
+	if proc.code != 0 {
+		return error(output.trim_space())
 	}
-	return result.output
+	return output
 }
 
 fn ensure_experience_db(db_path string) ! {
