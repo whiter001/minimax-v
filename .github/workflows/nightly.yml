@@ -1,0 +1,171 @@
+name: Nightly Build
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PROJECT_NAME: minimax-v
+  BINARY_NAME: minimax_cli
+
+jobs:
+  verify:
+    name: Verify repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install V
+        uses: vlang/setup-v@v1.4
+        with:
+          check-latest: true
+
+      - name: Verify formatting
+        shell: bash
+        run: bash ./tests/check_vfmt.sh
+
+      - name: Run unit tests
+        shell: bash
+        run: v -enable-globals test src/
+
+      - name: Run offline integration tests
+        shell: bash
+        run: bash ./tests/integration_test.sh
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            os: ubuntu-latest
+            bin_ext: ''
+          - target: windows-x86_64
+            os: windows-latest
+            bin_ext: '.exe'
+          - target: darwin-x86_64
+            os: macos-13
+            bin_ext: ''
+          - target: darwin-arm64
+            os: macos-14
+            bin_ext: ''
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install V
+        uses: vlang/setup-v@v1.4
+        with:
+          check-latest: true
+
+      - name: Build binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          $binaryPath = "bin/${env:BINARY_NAME}${{ matrix.bin_ext }}"
+          v -enable-globals -o $binaryPath src/
+
+      - name: Package artifact
+        shell: pwsh
+        env:
+          ARTIFACT_NAME: ${{ env.PROJECT_NAME }}-${{ matrix.target }}
+        run: |
+          $artifactDir = "$env:ARTIFACT_NAME"
+          $binaryName = "${env:BINARY_NAME}${{ matrix.bin_ext }}"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+          Copy-Item "bin/$binaryName" "$artifactDir/"
+          Compress-Archive -Path "$artifactDir/*" -DestinationPath "$artifactDir.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        env:
+          ARTIFACT_NAME: ${{ env.PROJECT_NAME }}-${{ matrix.target }}
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACT_NAME }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish nightly release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: nightly-assets
+          merge-multiple: true
+
+      - name: Update nightly tag
+        uses: richardsimko/update-tag@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: nightly
+
+      - name: Generate release body
+        id: release_body
+        shell: bash
+        run: |
+          now=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          short_sha="${GITHUB_SHA::7}"
+          trigger="${{ github.event_name }}"
+          ref_name="${{ github.ref_name }}"
+          {
+            echo 'BODY<<EOF'
+            echo '## 🌙 Nightly build'
+            echo
+            echo 'This is an automated nightly build for `minimax-v`.'
+            echo
+            echo '### Build details'
+            echo
+            echo "- Generated at: ${now}"
+            echo "- Trigger: ${trigger}"
+            echo "- Ref: ${ref_name}"
+            echo "- Commit: ${short_sha} (${{ github.sha }})"
+            echo "- Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo '### Included artifacts'
+            echo
+            echo '- `minimax-v-linux-x86_64.zip`'
+            echo '- `minimax-v-windows-x86_64.zip`'
+            echo '- `minimax-v-darwin-x86_64.zip`'
+            echo '- `minimax-v-darwin-arm64.zip`'
+            echo
+            echo '### Verification performed'
+            echo
+            echo '- V formatting check (`tests/check_vfmt.sh`)'
+            echo '- Full unit test suite (`v -enable-globals test src/`)'
+            echo '- Offline integration tests (`tests/integration_test.sh`)'
+            echo '- Multi-platform binary build with `-enable-globals`'
+            echo
+            echo '### Notes'
+            echo
+            echo '- This release is automatically updated in place under the `nightly` tag.'
+            echo '- It is intended for validation and early testing, not as a stable release.'
+            echo '- The packaged executable name is `minimax_cli` (or `minimax_cli.exe` on Windows).'
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish nightly release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: nightly-assets/*.zip
+          tag: nightly
+          name: minimax-v nightly build
+          body: ${{ steps.release_body.outputs.BODY }}
+          allowUpdates: true
+          prerelease: true
+          makeLatest: false
+          replacesArtifacts: true
+          removeArtifacts: true
+          artifactErrorsFailBuild: true
