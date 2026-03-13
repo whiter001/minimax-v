@@ -826,7 +826,7 @@ fn load_agents_md(workspace string) string {
 	mut parts := []string{}
 
 	// 1. User-level: ~/.config/minimax/AGENTS.md
-	user_path := os.expand_tilde_to_home('~/.config/minimax/AGENTS.md')
+	user_path := os.join_path(get_minimax_config_dir(), 'AGENTS.md')
 	if os.exists(user_path) {
 		if content := os.read_file(user_path) {
 			if content.trim_space().len > 0 {
@@ -855,7 +855,7 @@ fn load_agents_md(workspace string) string {
 // --- Session Note Tool (persistent memory across sessions) ---
 
 fn get_session_notes_path() string {
-	config_dir := os.expand_tilde_to_home('~/.config/minimax')
+	config_dir := get_minimax_config_dir()
 	if !os.is_dir(config_dir) {
 		os.mkdir_all(config_dir) or {}
 	}
@@ -915,7 +915,7 @@ __global working_checkpoint = WorkingCheckpoint{}
 __global working_checkpoint_loaded = false
 
 fn get_working_checkpoint_path() string {
-	config_dir := os.expand_tilde_to_home('~/.config/minimax')
+	config_dir := get_minimax_config_dir()
 	if !os.is_dir(config_dir) {
 		os.mkdir_all(config_dir) or {}
 	}
@@ -1022,7 +1022,7 @@ struct Checkpoint {
 
 fn new_checkpoint_manager(workspace string) CheckpointManager {
 	is_git := os.exists(os.join_path(workspace, '.git'))
-	backup_dir := os.join_path(os.home_dir(), '.config', 'minimax', 'checkpoints')
+	backup_dir := os.join_path(get_minimax_config_dir(), 'checkpoints')
 	if !os.is_dir(backup_dir) {
 		os.mkdir_all(backup_dir) or {}
 	}
@@ -1215,7 +1215,7 @@ __global todo_mgr = TodoManager{}
 __global todo_mgr_loaded = false
 
 fn get_todo_store_path() string {
-	config_dir := os.expand_tilde_to_home('~/.config/minimax')
+	config_dir := get_minimax_config_dir()
 	if !os.is_dir(config_dir) {
 		os.mkdir_all(config_dir) or {}
 	}

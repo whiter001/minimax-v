@@ -36,10 +36,10 @@ fn init_skill_registry(workspace string) {
 		skill_registry.skills << s
 	}
 	// 2. User-level skills (~/.config/minimax/skills/)
-	user_dir := os.expand_tilde_to_home('~/.config/minimax/skills')
+	user_dir := os.join_path(get_minimax_config_dir(), 'skills')
 	load_custom_skills_from_dir(user_dir, 'user')
 	// Also check ~/.agents/skills/ alias
-	user_agents_dir := os.expand_tilde_to_home('~/.agents/skills')
+	user_agents_dir := expand_home_path('~/.agents/skills')
 	load_custom_skills_from_dir(user_agents_dir, 'user')
 	// 3. Project-level skills (highest priority)
 	if workspace.len > 0 {

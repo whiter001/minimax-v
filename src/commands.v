@@ -184,13 +184,7 @@ fn get_minimax_config_dir() string {
 			return trimmed
 		}
 	}
-	if home := os.getenv_opt('HOME') {
-		trimmed := home.trim_space()
-		if trimmed.len > 0 {
-			return os.join_path(trimmed, '.config', 'minimax')
-		}
-	}
-	return os.join_path(os.home_dir(), '.config', 'minimax')
+	return os.join_path(get_user_home_dir(), '.config', 'minimax')
 }
 
 fn command_name_from_toml_path(root string, full_path string) string {

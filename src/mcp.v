@@ -599,10 +599,10 @@ pub:
 }
 
 fn load_mcp_config() []McpServerConfig {
-	config_path := os.join_path(os.home_dir(), '.config', 'minimax', 'mcp.json')
+	config_path := os.join_path(get_minimax_config_dir(), 'mcp.json')
 	if !os.exists(config_path) {
 		// Fallback: try legacy path
-		legacy_path := os.join_path(os.home_dir(), '.minimax_mcp.json')
+		legacy_path := os.join_path(get_user_home_dir(), '.minimax_mcp.json')
 		if os.exists(legacy_path) {
 			content := os.read_file(legacy_path) or { return [] }
 			return parse_mcp_config(content)

@@ -163,7 +163,7 @@ mut:
 }
 
 fn new_trajectory_recorder(enabled bool) TrajectoryRecorder {
-	traj_dir := os.expand_tilde_to_home('~/.config/minimax/trajectories')
+	traj_dir := os.join_path(get_minimax_config_dir(), 'trajectories')
 	if enabled && !os.is_dir(traj_dir) {
 		os.mkdir_all(traj_dir) or {}
 	}

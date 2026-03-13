@@ -50,20 +50,38 @@ fn default_config() Config {
 	}
 }
 
-// Cross-platform home directory path expansion
-fn expand_config_path(path string) string {
-	if path.starts_with('~') {
-		home := os.home_dir()
-		return os.join_path(home, path[1..])
+fn get_user_home_dir() string {
+	if home := os.getenv_opt('HOME') {
+		trimmed := home.trim_space()
+		if trimmed.len > 0 {
+			return trimmed
+		}
 	}
-	return path
+	return os.home_dir()
+}
+
+// Cross-platform home directory path expansion
+fn expand_home_path(path string) string {
+	if !path.starts_with('~') {
+		return path
+	}
+	home := get_user_home_dir()
+	suffix := path[1..].trim_left('\\/ ')
+	if suffix.len == 0 {
+		return home
+	}
+	return os.join_path(home, suffix)
+}
+
+fn expand_config_path(path string) string {
+	return expand_home_path(path)
 }
 
 fn load_config_file() Config {
 	mut config := default_config()
 
 	// Try primary config path: ~/.config/minimax/config
-	config_path := os.join_path(expand_config_path('~'), '.config', 'minimax', 'config')
+	config_path := os.join_path(get_minimax_config_dir(), 'config')
 	if os.exists(config_path) {
 		if content := os.read_file(config_path) {
 			return parse_config_content(content, config)
@@ -71,7 +89,7 @@ fn load_config_file() Config {
 	}
 
 	// Fallback: try legacy path ~/.minimax_config
-	legacy_path := os.join_path(expand_config_path('~'), '.minimax_config')
+	legacy_path := os.join_path(get_user_home_dir(), '.minimax_config')
 	if os.exists(legacy_path) {
 		if content := os.read_file(legacy_path) {
 			return parse_config_content(content, config)

@@ -181,7 +181,7 @@ fn resolve_acp_workspace(cwd string, fallback string) string {
 		return os.getwd()
 	}
 	if ws.starts_with('~') {
-		ws = os.join_path(os.home_dir(), ws[1..])
+		ws = expand_home_path(ws)
 	}
 	if !is_abs_path(ws) {
 		base := os.getwd()

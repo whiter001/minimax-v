@@ -288,7 +288,7 @@ fn handle_interactive_prefixed_command(mut client ApiClient, trimmed string) Int
 			target_dir := if client.workspace.len > 0 {
 				os.join_path(client.workspace, '.agents', 'skills')
 			} else {
-				os.expand_tilde_to_home('~/.config/minimax/skills')
+				os.join_path(get_minimax_config_dir(), 'skills')
 			}
 			println(create_skill_template(sk_name, target_dir))
 		} else {

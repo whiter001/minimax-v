@@ -14,7 +14,7 @@ mut:
 }
 
 fn new_logger(enabled bool) Logger {
-	log_dir := os.expand_tilde_to_home('~/.config/minimax/logs')
+	log_dir := os.join_path(get_minimax_config_dir(), 'logs')
 	if enabled && !os.is_dir(log_dir) {
 		os.mkdir_all(log_dir) or {}
 	}

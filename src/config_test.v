@@ -1,5 +1,7 @@
 module main
 
+import os
+
 // ===== parse_config_content =====
 
 fn test_parse_config_basic() {
@@ -153,6 +155,25 @@ fn test_default_config() {
 	assert config.enable_screen_capture == false
 	assert config.debug == false
 	assert config.workspace == ''
+}
+
+fn test_expand_home_path_expands_tilde_to_home_dir() {
+	expanded := expand_home_path('~/.config/minimax')
+	expected := os.join_path(get_user_home_dir(), '.config', 'minimax')
+	assert expanded == expected
+	assert !expanded.starts_with('~')
+}
+
+fn test_expand_home_path_supports_bare_tilde() {
+	assert expand_home_path('~') == get_user_home_dir()
+}
+
+fn test_get_minimax_config_dir_uses_minimax_config_home_override() {
+	os.setenv('MINIMAX_CONFIG_HOME', 'D:\\custom\\minimax', true)
+	defer {
+		os.unsetenv('MINIMAX_CONFIG_HOME')
+	}
+	assert get_minimax_config_dir() == 'D:\\custom\\minimax'
 }
 
 fn test_apply_env_override_supports_advanced_fields() {
