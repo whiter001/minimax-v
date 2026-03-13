@@ -2132,7 +2132,12 @@ fn resolve_workspace_path(path string, workspace string) string {
 		return path
 	}
 	// Already absolute path
-	if path.starts_with('/') || path.starts_with('~') {
+	if is_abs_path(path) || path.starts_with('~') {
+		return path
+	}
+	// Avoid double joining if path already contains workspace prefix
+	normalized_workspace := workspace.replace('/', '\\')
+	if path.contains(normalized_workspace) || path.contains(workspace.replace('\\', '/')) {
 		return path
 	}
 	return os.join_path(workspace, path)

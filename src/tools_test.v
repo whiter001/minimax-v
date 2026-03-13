@@ -12,6 +12,14 @@ fn test_resolve_workspace_path_absolute_path() {
 	assert resolve_workspace_path('/tmp/test.txt', '/home/user') == '/tmp/test.txt'
 }
 
+fn test_resolve_workspace_path_windows_absolute_path() {
+	assert resolve_workspace_path(r'D:\work\project\index.ts', r'D:\work\github\minimax-v') == r'D:\work\project\index.ts'
+}
+
+fn test_resolve_workspace_path_unc_absolute_path() {
+	assert resolve_workspace_path(r'\\server\share\index.ts', r'D:\work\github\minimax-v') == r'\\server\share\index.ts'
+}
+
 fn test_resolve_workspace_path_tilde_path() {
 	assert resolve_workspace_path('~/test.txt', '/home/user') == '~/test.txt'
 }

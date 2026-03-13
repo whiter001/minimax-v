@@ -194,7 +194,10 @@ fn is_abs_path(path string) bool {
 	if path.len >= 2 && path[1] == `:` {
 		return true
 	}
-	return path.starts_with('/') || path.starts_with('\\')
+	if path.len >= 2 && path[0] == `\\` {
+		return true
+	}
+	return path.starts_with('/') || path.starts_with('~')
 }
 
 fn build_acp_result(id_raw string, result_json string) string {
