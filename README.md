@@ -75,6 +75,10 @@ v -enable-globals -o minimax_cli src/
 - ask_user、session notes、todo、checkpoint。
 - 桌面控制和截图工具。
 
+补充说明：
+
+- Windows 下 `bash` 工具默认仍保持持久 shell 语义；针对 `nu ...`、`pwsh ...`、`pueue ...` 这类命令会优先走直执行路径，以避免部分 Git Bash 子进程环境与后台任务环境不一致。
+
 工具执行具有危险命令过滤，不会无条件放开系统破坏性命令。
 
 ### MCP

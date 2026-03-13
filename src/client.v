@@ -1,6 +1,7 @@
 module main
 
 import net.http
+import os
 import sync.stdatomic
 import time
 
@@ -51,6 +52,128 @@ fn normalize_tool_command(command string) string {
 		return ''
 	}
 	return command.split_any(' \t\n\r').filter(it.len > 0).join(' ')
+}
+
+fn extract_tool_command_head(command string) string {
+	trimmed := command.trim_space()
+	if trimmed.len == 0 {
+		return ''
+	}
+	if trimmed[0] == `"` || trimmed[0] == `'` {
+		quote := trimmed[0]
+		for i := 1; i < trimmed.len; i++ {
+			if trimmed[i] == quote {
+				return trimmed[1..i]
+			}
+		}
+		return trimmed[1..]
+	}
+	for i := 0; i < trimmed.len; i++ {
+		if trimmed[i] in [` `, `\t`, `\n`, `\r`, `;`, `&`, `|`, `>`, `<`] {
+			return trimmed[..i]
+		}
+	}
+	return trimmed
+}
+
+fn summarize_path_entries(path_value string, focus_terms []string, limit int) string {
+	if path_value.len == 0 {
+		return ''
+	}
+	mut entries := []string{}
+	for raw_entry in path_value.split(';') {
+		entry := raw_entry.trim_space()
+		if entry.len > 0 {
+			entries << entry
+		}
+	}
+	if entries.len == 0 {
+		return ''
+	}
+	mut focused := []string{}
+	for entry in entries {
+		lower_entry := entry.to_lower()
+		for term in focus_terms {
+			if lower_entry.contains(term) {
+				focused << entry
+				break
+			}
+		}
+	}
+	selected := if focused.len > 0 { focused } else { entries }
+	max_items := if limit > 0 { limit } else { selected.len }
+	end_idx := if max_items < selected.len { max_items } else { selected.len }
+	return selected[..end_idx].join(' | ')
+}
+
+fn resolve_bash_shell_path() string {
+	bash_path := find_bash_path()
+	if bash_path.len == 0 {
+		return ''
+	}
+	if bash_path == 'bash' {
+		return os.find_abs_path_of_executable('bash') or { 'bash' }
+	}
+	return bash_path
+}
+
+fn resolve_tool_command_path(command_name string) string {
+	if command_name.trim_space().len == 0 {
+		return ''
+	}
+	return os.find_abs_path_of_executable(command_name) or { '' }
+}
+
+fn build_bash_tool_diagnostic(command string) string {
+	normalized := normalize_tool_command(command)
+	command_head := extract_tool_command_head(command)
+	use_direct := should_use_windows_direct_command(command)
+	shell_path := if use_direct { resolve_tool_command_path('pwsh') } else { resolve_bash_shell_path() }
+	shell_kind := if use_direct {
+		'pwsh-direct'
+	} else if shell_path.len > 0 {
+		'bash'
+	} else if os.user_os() == 'windows' {
+		'cmd'
+	} else {
+		'sh'
+	}
+	path_value := os.getenv_opt('PATH') or { '' }
+	path_focus := summarize_path_entries(path_value, ['bun', 'pueue', 'git', 'nu\\bin', 'nu/bin',
+		'public'], 8)
+	mut parts := [
+		'shell=${shell_kind}',
+		'cwd=${bash_session.cwd}',
+		'session_env=${bash_session.env.len}',
+	]
+	if shell_path.len > 0 {
+		parts << 'shell_path=${shell_path}'
+	}
+	if use_direct {
+		parts << 'route=windows-direct'
+	}
+	if normalized.len > 0 {
+		parts << 'command=${normalized}'
+	}
+	if command_head.len > 0 {
+		parts << 'command_head=${command_head}'
+		head_path := resolve_tool_command_path(command_head)
+		if head_path.len > 0 {
+			parts << 'command_path=${head_path}'
+		}
+	}
+	for probe in ['pueue', 'bun', 'bash'] {
+		resolved := resolve_tool_command_path(probe)
+		if resolved.len > 0 {
+			parts << '${probe}_path=${resolved}'
+		} else {
+			parts << '${probe}_path=<missing>'
+		}
+	}
+	if path_focus.len > 0 {
+		parts << 'path_focus=${path_focus}'
+	}
+	return parts.join(' | ')
 }
 
 fn tool_use_signature(tool ToolUse) string {
@@ -777,6 +900,11 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 	for tu in tools {
 		c.logger.log_tool_call(tu.name, tu.input.keys().str())
 		c.logger.log_tool_input(tu.name, tu.input)
+		if tu.name == 'bash' {
+			c.logger.log_tool_diagnostic(tu.name, build_bash_tool_diagnostic(tu.input['command'] or {
+				''
+			}))
+		}
 		tool_start_ms := time.now().unix_milli()
 		tool_detail := summarize_tool_timing_detail(tu)
 		c.print_phase_status(tool_phase_message(tu), tool_detail)

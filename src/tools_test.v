@@ -415,6 +415,17 @@ fn test_bash_session_execute() {
 	assert result.contains('hello123')
 }
 
+fn test_should_use_windows_direct_command_matches_supported_shells() {
+	if os.user_os() != 'windows' {
+		return
+	}
+	assert should_use_windows_direct_command('pueue add -- bun -v')
+	assert should_use_windows_direct_command('pueue.exe add -- bun -v')
+	assert should_use_windows_direct_command('pwsh -NoProfile -Command "Get-Date"')
+	assert should_use_windows_direct_command('nu -c "ls"')
+	assert !should_use_windows_direct_command('bun -v')
+}
+
 // ===== read_many_files_tool =====
 
 fn test_read_many_files_tool_valid() {

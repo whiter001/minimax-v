@@ -430,6 +430,27 @@ fn test_should_block_repeated_failed_bash_command() {
 	assert should_block_repeated_failed_bash_command(tool, 'ls missing-dir', 2)
 }
 
+fn test_extract_tool_command_head_handles_basic_cases() {
+	assert extract_tool_command_head('bun -v') == 'bun'
+	assert extract_tool_command_head('  "C:\\Program Files\\Git\\bin\\bash.exe" -lc "pwd"') == 'C:\\Program Files\\Git\\bin\\bash.exe'
+}
+
+fn test_summarize_path_entries_prefers_focus_terms() {
+	summary := summarize_path_entries('C:\\Windows;C:\\Users\\white\\.bun\\bin;D:\\public',
+		['bun', 'public'], 8)
+	assert summary.contains('.bun\\bin')
+	assert summary.contains('D:\\public')
+	assert !summary.contains('C:\\Windows')
+}
+
+fn test_build_bash_tool_diagnostic_includes_command_context() {
+	bash_session = new_bash_session('')
+	diag := build_bash_tool_diagnostic('bun -v')
+	assert diag.contains('command_head=bun')
+	assert diag.contains('cwd=')
+	assert diag.contains('bun_path=')
+}
+
 fn test_build_tool_error_results_json_marks_errors() {
 	tools := [
 		ToolUse{

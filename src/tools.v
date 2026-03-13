@@ -66,6 +66,88 @@ fn find_bash_path() string {
 	return ''
 }
 
+fn find_pwsh_path() string {
+	possible_paths := [
+		'pwsh',
+		'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+		'C:\\Program Files\\PowerShell\\7-preview\\pwsh.exe',
+	]
+	for path in possible_paths {
+		if os.exists(path) {
+			return path
+		}
+		if path == 'pwsh' {
+			result := os.execute('pwsh -Version')
+			if result.exit_code == 0 {
+				return 'pwsh'
+			}
+		}
+	}
+	return ''
+}
+
+fn should_use_windows_direct_command(command string) bool {
+	if os.user_os() != 'windows' {
+		return false
+	}
+	head := extract_tool_command_head(command).to_lower()
+	return head in ['pueue', 'pueue.exe', 'pwsh', 'pwsh.exe', 'nu', 'nu.exe']
+		|| head.ends_with('\\pueue.exe') || head.ends_with('/pueue.exe')
+		|| head.ends_with('\\pwsh.exe') || head.ends_with('/pwsh.exe')
+		|| head.ends_with('\\nu.exe') || head.ends_with('/nu.exe')
+}
+
+fn escape_powershell_single_quoted(s string) string {
+	return s.replace("'", "''")
+}
+
+fn extract_pwsh_cwd(output string) (string, string) {
+	if cwd_idx := output.index('__PWSH_CWD__=') {
+		cwd_line := output[cwd_idx + 13..]
+		newline_idx := cwd_line.index('\n') or { cwd_line.len }
+		new_cwd := cwd_line[..newline_idx].trim_space()
+		clean_output := output[..cwd_idx].trim_right('\n ')
+		return new_cwd, clean_output
+	}
+	return '', output
+}
+
+fn (mut s BashSession) execute_with_windows_pwsh(command string) string {
+	pwsh_path := find_pwsh_path()
+	if pwsh_path.len == 0 {
+		return ''
+	}
+	actual_pwsh := if pwsh_path == 'pwsh' {
+		os.find_abs_path_of_executable('pwsh') or { 'pwsh' }
+	} else {
+		pwsh_path
+	}
+	ts := time.now().unix_milli()
+	tmp_ps := os.join_path(os.temp_dir(), 'minimax_bash_pwsh_${ts}.ps1')
+	mut lines := ["Set-Location -LiteralPath '${escape_powershell_single_quoted(s.cwd)}'"]
+	for key, val in s.env {
+		lines << r'$env:' + key + " = '${escape_powershell_single_quoted(val)}'"
+	}
+	lines << command
+	lines << 'Write-Output "__PWSH_CWD__=$((Get-Location).Path)"'
+	os.write_file(tmp_ps, lines.join('\n')) or { return 'Error: 无法写入临时 PowerShell 脚本: ${err}' }
+	defer {
+		os.rm(tmp_ps) or {}
+	}
+	result := os.execute('"${actual_pwsh}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${tmp_ps}"')
+	mut output := result.output
+	exit_code := result.exit_code
+
+	new_cwd, clean_output := extract_pwsh_cwd(output)
+	if new_cwd.len > 0 && os.is_dir(new_cwd) {
+		s.cwd = new_cwd
+	}
+	if exit_code != 0 {
+		return 'Exit code: ${exit_code}\n[cwd: ${s.cwd}]\n${clean_output}'
+	}
+	return '${clean_output}\n[cwd: ${s.cwd}]'
+}
+
 fn (mut s BashSession) execute(command string) string {
 	if command.len == 0 {
 		return 'Error: command is required'
@@ -85,6 +167,13 @@ fn (mut s BashSession) execute(command string) string {
 	for d in windows_dangerous {
 		if command.contains(d) {
 			return 'Error: ⚠️  拒绝执行危险命令'
+		}
+	}
+
+	if should_use_windows_direct_command(command) {
+		result := s.execute_with_windows_pwsh(command)
+		if result.len > 0 {
+			return result
 		}
 	}
 

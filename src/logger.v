@@ -93,6 +93,15 @@ fn (l Logger) log_tool_result_detail(name string, result string) {
 		'\\n')}')
 }
 
+fn (l Logger) log_tool_diagnostic(name string, detail string) {
+	truncated := if detail.len > max_logged_text_len {
+		'${detail[..max_logged_text_len]}...[truncated ${detail.len - max_logged_text_len} chars]'
+	} else {
+		detail
+	}
+	l.log('INFO', 'TOOL_DIAG', 'name=${name} detail=${truncated.replace('\n', '\\n')}')
+}
+
 fn (l Logger) log_mcp_request(server string, method string, params string) {
 	truncated := if params.len > max_logged_text_len {
 		'${params[..max_logged_text_len]}...[truncated]'
