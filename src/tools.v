@@ -93,8 +93,8 @@ fn should_use_windows_direct_command(command string) bool {
 	head := extract_tool_command_head(command).to_lower()
 	return head in ['pueue', 'pueue.exe', 'pwsh', 'pwsh.exe', 'nu', 'nu.exe']
 		|| head.ends_with('\\pueue.exe') || head.ends_with('/pueue.exe')
-		|| head.ends_with('\\pwsh.exe') || head.ends_with('/pwsh.exe')
-		|| head.ends_with('\\nu.exe') || head.ends_with('/nu.exe')
+		|| head.ends_with('\\pwsh.exe') || head.ends_with('/pwsh.exe') || head.ends_with('\\nu.exe')
+		|| head.ends_with('/nu.exe')
 }
 
 fn escape_powershell_single_quoted(s string) string {
@@ -124,13 +124,17 @@ fn (mut s BashSession) execute_with_windows_pwsh(command string) string {
 	}
 	ts := time.now().unix_milli()
 	tmp_ps := os.join_path(os.temp_dir(), 'minimax_bash_pwsh_${ts}.ps1')
-	mut lines := ["Set-Location -LiteralPath '${escape_powershell_single_quoted(s.cwd)}'"]
+	mut lines := [
+		"Set-Location -LiteralPath '${escape_powershell_single_quoted(s.cwd)}'",
+	]
 	for key, val in s.env {
 		lines << r'$env:' + key + " = '${escape_powershell_single_quoted(val)}'"
 	}
 	lines << command
 	lines << 'Write-Output "__PWSH_CWD__=$((Get-Location).Path)"'
-	os.write_file(tmp_ps, lines.join('\n')) or { return 'Error: 无法写入临时 PowerShell 脚本: ${err}' }
+	os.write_file(tmp_ps, lines.join('\n')) or {
+		return 'Error: 无法写入临时 PowerShell 脚本: ${err}'
+	}
 	defer {
 		os.rm(tmp_ps) or {}
 	}

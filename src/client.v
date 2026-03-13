@@ -128,7 +128,11 @@ fn build_bash_tool_diagnostic(command string) string {
 	normalized := normalize_tool_command(command)
 	command_head := extract_tool_command_head(command)
 	use_direct := should_use_windows_direct_command(command)
-	shell_path := if use_direct { resolve_tool_command_path('pwsh') } else { resolve_bash_shell_path() }
+	shell_path := if use_direct {
+		resolve_tool_command_path('pwsh')
+	} else {
+		resolve_bash_shell_path()
+	}
 	shell_kind := if use_direct {
 		'pwsh-direct'
 	} else if shell_path.len > 0 {
