@@ -1,5 +1,7 @@
 module main
 
+import os
+
 fn test_strip_ansi_escape_sequences_removes_color_codes() {
 	input := '\x1b[1;34myou >\x1b[0m '
 	assert strip_ansi_escape_sequences(input) == 'you > '
@@ -48,6 +50,7 @@ fn test_delete_rune_at_cursor_end_noop() {
 fn test_build_help_text_mentions_term_ui() {
 	help := build_help_text()
 	assert help.contains('minimax_cli --term-ui')
+	assert help.contains('--auto-skills')
 	assert help.contains('--term-ui                      使用 term.ui 终端界面（交互模式）')
 	assert help.contains('minimax_cli cron ...')
 }
@@ -100,6 +103,14 @@ fn test_apply_cli_boolean_flag_enables_tools() {
 	mut client := new_api_client(default_config())
 	assert apply_cli_boolean_flag(mut client, '--enable-tools')
 	assert client.enable_tools
+}
+
+fn test_apply_cli_boolean_flag_enables_auto_skills_and_workspace() {
+	mut client := new_api_client(default_config())
+	assert apply_cli_boolean_flag(mut client, '--auto-skills')
+	assert client.auto_skills
+	assert client.enable_tools
+	assert client.workspace == os.getwd()
 }
 
 fn test_apply_cli_boolean_flag_enables_desktop_control_and_tools() {

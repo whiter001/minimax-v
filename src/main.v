@@ -112,6 +112,9 @@ fn main() {
 	}
 
 	mut client := new_api_client(config)
+	if client.auto_skills {
+		enable_auto_skills(mut client)
+	}
 	mut mcp_enabled := false
 	mut acp_mode := false
 	mut term_ui_mode := false
@@ -200,6 +203,7 @@ fn main() {
 				if k + 1 < args.len {
 					k++
 					if skill := find_skill(args[k]) {
+						client.auto_skills = false
 						client.system_prompt = skill.prompt
 						client.enable_tools = true
 						current_skill = skill.name
@@ -266,6 +270,7 @@ fn main() {
 	}
 
 	set_tool_capabilities(client.enable_desktop_control, client.enable_screen_capture)
+	bash_session = new_bash_session(client.workspace)
 
 	// Re-init skill registry with final workspace (--workspace may override)
 	reload_skill_registry(client.workspace)

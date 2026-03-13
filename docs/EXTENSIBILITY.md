@@ -38,6 +38,13 @@ MCP 用于把外部工具以 stdio JSON-RPC 的方式接入到 CLI。
 
 项目级会覆盖同名用户级和内置技能。
 
+补充说明：
+
+- 用户级技能默认会被扫描，无需额外参数。
+- 项目级 `.agents/skills` 只有在 workspace 已设置时才会被扫描；可通过 `--workspace <path>` 或环境变量 `MINIMAX_WORKSPACE` 指定。
+- `--skills` 用于列出当前已发现的技能，`--skill <name>` 用于直接启用某个技能。
+- `--auto-skills` 会让 AI 优先自行决定是否激活某个 skill；若未显式设置 workspace，则默认使用当前目录来纳入项目级 `.agents/skills`。
+
 ### 文件格式
 
 技能文件名固定为 SKILL.md，使用 YAML frontmatter 声明元信息：
@@ -53,7 +60,7 @@ description: Review code changes for bugs and regressions
 
 ### 使用方式
 
-- CLI 参数：--skills、--skill <name>
+- CLI 参数：--skills、--skill <name>、--auto-skills
 - 交互命令：skills、skills reload、skills create <name>、skill <name>
 - 工具调用：activate_skill
 

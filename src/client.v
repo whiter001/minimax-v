@@ -115,6 +115,7 @@ pub mut:
 	system_prompt          string
 	use_streaming          bool
 	enable_tools           bool
+	auto_skills            bool
 	enable_desktop_control bool
 	enable_screen_capture  bool
 	debug                  bool
@@ -142,6 +143,7 @@ fn new_api_client(config Config) ApiClient {
 		system_prompt:          config.system_prompt
 		use_streaming:          false
 		enable_tools:           config.enable_tools
+		auto_skills:            config.auto_skills
 		enable_desktop_control: config.enable_desktop_control
 		enable_screen_capture:  config.enable_screen_capture
 		debug:                  config.debug
@@ -212,6 +214,14 @@ fn (mut c ApiClient) build_request_json() string {
 				effective_system = '${effective_system}\n\n${skills_meta}'
 			} else {
 				effective_system = skills_meta
+			}
+		}
+		if c.auto_skills {
+			auto_skills_instruction := 'When the user task matches one of the available skills, proactively call the activate_skill tool yourself before continuing. Choose the best matching skill without asking the user unless the choice is genuinely ambiguous.'
+			if effective_system.len > 0 {
+				effective_system = '${effective_system}\n\n${auto_skills_instruction}'
+			} else {
+				effective_system = auto_skills_instruction
 			}
 		}
 		working_checkpoint := get_working_checkpoint_context()

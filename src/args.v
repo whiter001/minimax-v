@@ -1,5 +1,15 @@
 module main
 
+import os
+
+fn enable_auto_skills(mut client ApiClient) {
+	client.auto_skills = true
+	client.enable_tools = true
+	if client.workspace.len == 0 {
+		client.workspace = os.getwd()
+	}
+}
+
 fn handle_early_cli_exit(args []string) bool {
 	for arg in args[1..] {
 		match arg {
@@ -24,6 +34,9 @@ fn apply_cli_boolean_flag(mut client ApiClient, arg string) bool {
 		}
 		'--enable-tools' {
 			client.enable_tools = true
+		}
+		'--auto-skills' {
+			enable_auto_skills(mut client)
 		}
 		'--enable-desktop-control' {
 			client.enable_desktop_control = true
@@ -153,6 +166,7 @@ fn build_help_text() string {
 		'  --max-tokens <n>               限制输出长度，最大 1000000 (default: 200000)',
 		'  --system <prompt>              设置系统提示词',
 		'  --skill <name>                 使用技能 (内置/自定义 SKILL.md)',
+		'  --auto-skills                  暴露所有已发现 skills，让 AI 自动选择并激活最合适的 skill',
 		'  --stream                       启用流式响应模式',
 		'  --enable-tools                 启用AI工具调用（AI可主动读写文件/执行命令）',
 		'  --enable-desktop-control       启用鼠标/键盘控制工具（高权限）',
@@ -228,6 +242,7 @@ fn build_help_text() string {
 		'  temperature=0.7',
 		'  max_tokens=200000',
 		'  enable_tools=true',
+		'  auto_skills=false',
 		'  enable_desktop_control=false',
 		'  enable_screen_capture=false',
 		'  enable_logging=true',
@@ -247,6 +262,7 @@ fn print_help() {
 	println('  MINIMAX_MAX_TOKENS             输出长度')
 	println('  MINIMAX_SYSTEM_PROMPT          系统提示词')
 	println('  MINIMAX_ENABLE_TOOLS           启用AI工具 (true/1)')
+	println('  MINIMAX_AUTO_SKILLS            自动暴露并激活匹配的 skills (true/1)')
 	println('  MINIMAX_ENABLE_DESKTOP_CONTROL 启用鼠标/键盘控制 (true/1)')
 	println('  MINIMAX_ENABLE_SCREEN_CAPTURE  启用屏幕截图 (true/1)')
 	println('  MINIMAX_ENABLE_LOGGING         启用文件日志 (true/1)')
@@ -258,6 +274,7 @@ fn print_help() {
 	println('\x1b[1m示例:\x1b[0m')
 	println('  ./minimax_cli -p "Hello" --temperature 0.5')
 	println('  ./minimax_cli --enable-tools -p "读取当前目录的文件列表"')
+	println('  ./minimax_cli --auto-skills -p "帮我管理后台任务"')
 	println('  ./minimax_cli --mcp --enable-screen-capture -p "截图并识别屏幕中的文字"')
 	println('  ./minimax_cli --skill coder --enable-tools -p "重构main.v"')
 	println('  ./minimax_cli --mcp -p "搜索一下V语言最新版本"')

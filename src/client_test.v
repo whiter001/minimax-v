@@ -523,6 +523,17 @@ fn test_build_request_json_activate_skill_in_tools() {
 	assert json.contains('"name":"activate_skill"')
 }
 
+fn test_build_request_json_auto_skills_adds_instruction() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	config.auto_skills = true
+	mut client := new_api_client(config)
+	client.add_message('user', '请帮我管理后台任务')
+	json := client.build_request_json()
+	assert json.contains('proactively call the activate_skill tool yourself')
+}
+
 fn test_build_request_json_includes_working_checkpoint() {
 	prev_cp := working_checkpoint
 	prev_loaded := working_checkpoint_loaded

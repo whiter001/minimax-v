@@ -127,6 +127,7 @@ v -enable-globals test src/config_test.v
 - SKILL.md 文件名是否正确。
 - YAML frontmatter 是否包含 name 和 description。
 - 文件目录是否位于 .agents/skills 或 ~/.config/minimax/skills。
+- 如果使用项目级 `.agents/skills`，确认已通过 `--workspace` 或 `MINIMAX_WORKSPACE` 设置工作目录。
 
 ### 扩展未生效
 

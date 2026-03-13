@@ -94,7 +94,7 @@ v -enable-globals -o minimax_cli src/
 
 ### 扩展能力
 
-- Skills：按目录自动发现和切换。
+- Skills：按目录自动发现和切换，默认扫描 `~/.config/minimax/skills` / `~/.agents/skills`，项目级 `.agents/skills` 需要先设置 `--workspace` 或 `MINIMAX_WORKSPACE`；可用 `--auto-skills` 让 AI 自动选择并激活匹配 skill。
 - Custom Commands：基于 TOML 的命令模板。
 - Extensions：安装、启用、更新命令与 MCP 组合包。
 - Experience：把经验记录到本地知识库，再同步回技能。
@@ -112,6 +112,7 @@ max_tokens=200000
 max_rounds=5000
 token_limit=80000
 enable_tools=false
+auto_skills=false
 enable_desktop_control=false
 enable_screen_capture=false
 enable_logging=false
@@ -135,6 +136,7 @@ debug=false
 - --system PROMPT
 - --workspace PATH
 - --skill NAME
+- --auto-skills
 - --skills
 - --stream
 - --enable-tools
@@ -169,6 +171,11 @@ debug=false
 - mcp, mcp start, mcp stop
 
 准确行为以 [src/main.v](src/main.v) 的帮助文本和命令分发逻辑为准。
+
+补充说明：
+
+- `--enable-tools` 开启时，模型会收到已发现 skills 的元信息，并可通过 `activate_skill` 工具自行加载对应 skill。
+- `--auto-skills` 会显式鼓励模型优先自行选择匹配的 skill；若未设置 `workspace`，会默认使用当前目录以纳入项目级 `.agents/skills`。
 
 ## 文档索引
 

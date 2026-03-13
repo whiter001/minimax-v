@@ -24,6 +24,7 @@ pub mut:
 	token_limit            int
 	system_prompt          string
 	enable_tools           bool
+	auto_skills            bool
 	enable_desktop_control bool
 	enable_screen_capture  bool
 	enable_logging         bool
@@ -42,6 +43,7 @@ fn default_config() Config {
 		token_limit:            80000
 		system_prompt:          ''
 		enable_tools:           false
+		auto_skills:            false
 		enable_desktop_control: false
 		enable_screen_capture:  false
 		enable_logging:         false
@@ -147,6 +149,12 @@ fn parse_config_content(content string, base Config) Config {
 				'enable_tools' {
 					config.enable_tools = val == 'true' || val == '1'
 				}
+				'auto_skills' {
+					config.auto_skills = val == 'true' || val == '1'
+					if config.auto_skills {
+						config.enable_tools = true
+					}
+				}
 				'enable_desktop_control' {
 					config.enable_desktop_control = val == 'true' || val == '1'
 				}
@@ -179,6 +187,9 @@ fn parse_config_content(content string, base Config) Config {
 				else {}
 			}
 		}
+	}
+	if config.auto_skills {
+		config.enable_tools = true
 	}
 
 	return config
@@ -224,8 +235,14 @@ fn apply_env_overrides(mut config Config) {
 	if val := os.getenv_opt('MINIMAX_SYSTEM_PROMPT') {
 		apply_env_override(mut config, 'MINIMAX_SYSTEM_PROMPT', val)
 	}
+	if val := os.getenv_opt('MINIMAX_AUTO_SKILLS') {
+		apply_env_override(mut config, 'MINIMAX_AUTO_SKILLS', val)
+	}
 	if val := os.getenv_opt('MINIMAX_WORKSPACE') {
 		apply_env_override(mut config, 'MINIMAX_WORKSPACE', val)
+	}
+	if config.auto_skills {
+		config.enable_tools = true
 	}
 }
 
@@ -256,6 +273,12 @@ fn apply_env_override(mut config Config, key string, value string) {
 		}
 		'MINIMAX_ENABLE_TOOLS' {
 			config.enable_tools = value == 'true' || value == '1'
+		}
+		'MINIMAX_AUTO_SKILLS' {
+			config.auto_skills = value == 'true' || value == '1'
+			if config.auto_skills {
+				config.enable_tools = true
+			}
 		}
 		'MINIMAX_ENABLE_DESKTOP_CONTROL' {
 			config.enable_desktop_control = value == 'true' || value == '1'
