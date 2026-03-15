@@ -18,6 +18,8 @@ max_tokens=32768
 # === 功能开关 ===
 # 启用 AI 工具调用（AI 可主动读写文件、执行命令）
 enable_tools=true
+# 任务执行前自动检查匹配的全局 SOP（~/.config/minimax/sops/<skill>/SOP.md）
+auto_check_sops=true
 # 启用鼠标/键盘控制工具（高权限，默认建议关闭）
 enable_desktop_control=false
 # 启用屏幕截图工具（用于截图后识图）

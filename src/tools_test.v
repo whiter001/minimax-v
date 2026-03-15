@@ -437,6 +437,33 @@ fn test_execute_tool_use_activate_skill_not_found() {
 	assert result.contains('not found')
 }
 
+fn test_execute_tool_use_match_sop() {
+	test_dir := '/tmp/__minimax_tool_match_sop__'
+	os.mkdir_all(os.join_path(test_dir, 'sops', 'wechat-mp-draft-publisher')) or {}
+	os.setenv('MINIMAX_CONFIG_HOME', test_dir, true)
+	defer {
+		os.unsetenv('MINIMAX_CONFIG_HOME')
+		os.rmdir_all(test_dir) or {}
+	}
+	os.write_file(os.join_path(test_dir, 'sops', 'wechat-mp-draft-publisher', 'SOP.md'),
+		'# SOP\n\n微信公众号草稿箱发布流程\n\n先检查草稿状态再处理封面。') or {}
+	tool := ToolUse{
+		id:    'tu_sop_1'
+		name:  'match_sop'
+		input: {
+			'task':  '请处理微信公众号草稿箱封面'
+			'limit': '2'
+		}
+	}
+	result := execute_tool_use(tool)
+	assert result.contains('Best SOP matches for task')
+	assert result.contains('suggested_read_order:')
+	assert result.contains('wechat-mp-draft-publisher')
+	assert result.contains('score_breakdown:')
+	assert result.contains('matched_terms')
+	assert result.contains('path:')
+}
+
 // ===== BashSession =====
 
 fn test_new_bash_session_default() {
@@ -557,6 +584,7 @@ fn test_get_tools_schema_json_valid() {
 	assert json.contains('keyboard_control')
 	assert json.contains('capture_screen')
 	assert json.contains('screen_analyze')
+	assert json.contains('match_sop')
 	assert json.contains('record_experience')
 	assert json.contains('session_note')
 	assert json.contains('task_done')

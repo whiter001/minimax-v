@@ -99,6 +99,7 @@ v -enable-globals -o minimax_cli src/
 ### 扩展能力
 
 - Skills：按目录自动发现和切换，默认扫描 `~/.config/minimax/skills` / `~/.agents/skills`，项目级 `.agents/skills` 需要先设置 `--workspace` 或 `MINIMAX_WORKSPACE`；可用 `--auto-skills` 让 AI 自动选择并激活匹配 skill。
+- SOPs：默认扫描 `~/.config/minimax/sops/<skill>/SOP.md`；开启工具调用后会自动暴露可用 SOP，并在任务匹配时先读取对应 SOP 作为执行前检查。
 - Custom Commands：基于 TOML 的命令模板。
 - Extensions：安装、启用、更新命令与 MCP 组合包。
 - Experience：把经验记录到本地知识库，并自动写回全局 skill 与全局 SOP。
@@ -117,6 +118,7 @@ max_rounds=5000
 token_limit=80000
 enable_tools=false
 auto_skills=false
+auto_check_sops=true
 auto_write_skills=true
 auto_upgrade_sops=true
 knowledge_sync_mode=balanced
@@ -184,6 +186,7 @@ debug=false
 
 - `--enable-tools` 开启时，模型会收到已发现 skills 的元信息，并可通过 `activate_skill` 工具自行加载对应 skill。
 - `--auto-skills` 会显式鼓励模型优先自行选择匹配的 skill；若未设置 `workspace`，会默认使用当前目录以纳入项目级 `.agents/skills`。
+- 开启工具调用且存在全局 SOP 时，模型会先调用 `match_sop` 工具匹配最相关的 SOP。该工具会返回分项评分、命中层级以及 `suggested_read_order`，模型再按建议顺序用 `read_file` 读取对应 SOP；可通过 `auto_check_sops=false` 或环境变量 `MINIMAX_AUTO_CHECK_SOPS=0` 关闭。
 - `experience add` 默认会按 `knowledge_sync_mode` 自动同步到全局 `~/.config/minimax/skills` 和 `~/.config/minimax/sops`；可通过 `auto_write_skills`、`auto_upgrade_sops` 或对应环境变量关闭。
 - AI 开启工具调用后，还可以直接使用 `record_experience` 工具沉淀经验，不必依赖交互命令。
 

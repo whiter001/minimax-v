@@ -247,6 +247,7 @@ fn build_help_text() string {
 		'  max_tokens=102400',
 		'  enable_tools=true',
 		'  auto_skills=false',
+		'  auto_check_sops=true',
 		'  auto_write_skills=true',
 		'  auto_upgrade_sops=true',
 		'  knowledge_sync_mode=balanced',
@@ -270,6 +271,7 @@ fn print_help() {
 	println('  MINIMAX_SYSTEM_PROMPT          系统提示词')
 	println('  MINIMAX_ENABLE_TOOLS           启用AI工具 (true/1)')
 	println('  MINIMAX_AUTO_SKILLS            自动暴露并激活匹配的 skills (true/1)')
+	println('  MINIMAX_AUTO_CHECK_SOPS        任务开始前自动检查匹配的 SOP (true/1)')
 	println('  MINIMAX_AUTO_WRITE_SKILLS      experience add 后自动写入全局 skills (true/1)')
 	println('  MINIMAX_AUTO_UPGRADE_SOPS      experience add 后自动升级全局 SOP (true/1)')
 	println('  MINIMAX_KNOWLEDGE_SYNC_MODE    经验同步模式 concise|balanced|strict')

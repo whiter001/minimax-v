@@ -51,6 +51,7 @@ fn test_build_help_text_mentions_term_ui() {
 	help := build_help_text()
 	assert help.contains('minimax_cli --term-ui')
 	assert help.contains('--auto-skills')
+	assert help.contains('auto_check_sops=true')
 	assert help.contains('--term-ui                      使用 term.ui 终端界面（交互模式）')
 	assert help.contains('minimax_cli cron ...')
 }

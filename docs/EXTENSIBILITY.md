@@ -45,6 +45,19 @@ MCP 用于把外部工具以 stdio JSON-RPC 的方式接入到 CLI。
 - `--skills` 用于列出当前已发现的技能，`--skill <name>` 用于直接启用某个技能。
 - `--auto-skills` 会让 AI 优先自行决定是否激活某个 skill；若未显式设置 workspace，则默认使用当前目录来纳入项目级 `.agents/skills`。
 
+## SOPs
+
+### 位置
+
+- 全局：~/.config/minimax/sops/<skill>/SOP.md
+
+### 使用方式
+
+- 交互命令：sops、sops list、sops show <name>、sops sync <name|all> [mode]
+- 自动检查：只要启用了工具调用，CLI 就会向模型暴露可用 SOP 列表，并提供 match_sop 工具；模型会先用 match_sop 匹配最相关 SOP，再按 suggested_read_order 用 read_file 读取一个或多个 SOP。
+- 匹配结果：match_sop 会返回总分、score_breakdown、matched_layers 和 suggested_read_order，便于模型解释命中原因并处理复合任务。
+- 关闭方式：配置文件中设置 auto_check_sops=false，或环境变量 MINIMAX_AUTO_CHECK_SOPS=0。
+
 ### 文件格式
 
 技能文件名固定为 SKILL.md，使用 YAML frontmatter 声明元信息：

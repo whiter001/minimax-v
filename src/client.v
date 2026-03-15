@@ -245,6 +245,7 @@ pub mut:
 	use_streaming          bool
 	enable_tools           bool
 	auto_skills            bool
+	auto_check_sops        bool
 	enable_desktop_control bool
 	enable_screen_capture  bool
 	debug                  bool
@@ -273,6 +274,7 @@ fn new_api_client(config Config) ApiClient {
 		use_streaming:          false
 		enable_tools:           config.enable_tools
 		auto_skills:            config.auto_skills
+		auto_check_sops:        config.auto_check_sops
 		enable_desktop_control: config.enable_desktop_control
 		enable_screen_capture:  config.enable_screen_capture
 		debug:                  config.debug
@@ -345,12 +347,28 @@ fn (mut c ApiClient) build_request_json() string {
 				effective_system = skills_meta
 			}
 		}
+		sops_meta := build_sops_metadata()
+		if sops_meta.len > 0 {
+			if effective_system.len > 0 {
+				effective_system = '${effective_system}\n\n${sops_meta}'
+			} else {
+				effective_system = sops_meta
+			}
+		}
 		if c.auto_skills {
 			auto_skills_instruction := 'When the user task matches one of the available skills, proactively call the activate_skill tool yourself before continuing. Choose the best matching skill without asking the user unless the choice is genuinely ambiguous.'
 			if effective_system.len > 0 {
 				effective_system = '${effective_system}\n\n${auto_skills_instruction}'
 			} else {
 				effective_system = auto_skills_instruction
+			}
+		}
+		if c.auto_check_sops && sops_meta.len > 0 {
+			auto_sops_instruction := 'Before executing a task, proactively call the match_sop tool with the user task to identify the best matching SOP. If relevant SOPs are returned, follow the suggested_read_order, read the recommended SOP files with the read_file tool, and use them as operating guidance. Do this without asking the user unless multiple SOPs conflict or the match is genuinely unclear. Repository instructions, workspace instructions, and direct user instructions override SOP guidance when they conflict.'
+			if effective_system.len > 0 {
+				effective_system = '${effective_system}\n\n${auto_sops_instruction}'
+			} else {
+				effective_system = auto_sops_instruction
 			}
 		}
 		if effective_system.len > 0 {
@@ -763,9 +781,9 @@ fn (c ApiClient) print_phase_status(message string, detail string) {
 
 fn tool_phase_message(tool ToolUse) string {
 	builtin_names := ['str_replace_editor', 'bash', 'read_file', 'write_file', 'list_dir',
-		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'session_note',
-		'task_done', 'grep_search', 'find_files', 'sequentialthinking', 'json_edit', 'ask_user',
-		'update_working_checkpoint', 'todo_manager', 'read_many_files', 'activate_skill']
+		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'match_sop',
+		'session_note', 'task_done', 'grep_search', 'find_files', 'sequentialthinking', 'json_edit',
+		'ask_user', 'update_working_checkpoint', 'todo_manager', 'read_many_files', 'activate_skill']
 	return match tool.name {
 		'bash', 'run_command' {
 			'执行 shell'

@@ -25,6 +25,7 @@ pub mut:
 	system_prompt          string
 	enable_tools           bool
 	auto_skills            bool
+	auto_check_sops        bool
 	auto_write_skills      bool
 	auto_upgrade_sops      bool
 	knowledge_sync_mode    string
@@ -47,6 +48,7 @@ fn default_config() Config {
 		system_prompt:          ''
 		enable_tools:           false
 		auto_skills:            false
+		auto_check_sops:        true
 		auto_write_skills:      true
 		auto_upgrade_sops:      true
 		knowledge_sync_mode:    'balanced'
@@ -161,6 +163,9 @@ fn parse_config_content(content string, base Config) Config {
 						config.enable_tools = true
 					}
 				}
+				'auto_check_sops' {
+					config.auto_check_sops = val == 'true' || val == '1'
+				}
 				'auto_write_skills' {
 					config.auto_write_skills = val == 'true' || val == '1'
 				}
@@ -256,6 +261,9 @@ fn apply_env_overrides(mut config Config) {
 	if val := os.getenv_opt('MINIMAX_AUTO_SKILLS') {
 		apply_env_override(mut config, 'MINIMAX_AUTO_SKILLS', val)
 	}
+	if val := os.getenv_opt('MINIMAX_AUTO_CHECK_SOPS') {
+		apply_env_override(mut config, 'MINIMAX_AUTO_CHECK_SOPS', val)
+	}
 	if val := os.getenv_opt('MINIMAX_AUTO_WRITE_SKILLS') {
 		apply_env_override(mut config, 'MINIMAX_AUTO_WRITE_SKILLS', val)
 	}
@@ -306,6 +314,9 @@ fn apply_env_override(mut config Config, key string, value string) {
 			if config.auto_skills {
 				config.enable_tools = true
 			}
+		}
+		'MINIMAX_AUTO_CHECK_SOPS' {
+			config.auto_check_sops = value == 'true' || value == '1'
 		}
 		'MINIMAX_AUTO_WRITE_SKILLS' {
 			config.auto_write_skills = value == 'true' || value == '1'

@@ -2155,6 +2155,7 @@ fn get_available_tools() []ToolDefinition {
 		ToolDefinition{'keyboard_control', '键盘控制（需 enable_desktop_control）'},
 		ToolDefinition{'capture_screen', '屏幕截图（需 enable_screen_capture）'},
 		ToolDefinition{'screen_analyze', '截图并调用 understand_image 识别（需 --mcp）'},
+		ToolDefinition{'match_sop', 'SOP 匹配 - 根据当前任务匹配最相关的全局 SOP'},
 		ToolDefinition{'record_experience', '经验沉淀 - 记录经验并自动同步全局 skill/SOP'},
 		ToolDefinition{'session_note', '持久化记忆 - read/write/append 跨会话笔记'},
 		ToolDefinition{'update_working_checkpoint', '短期工作记忆 - 记录进度/约束/SOP'},
@@ -2500,6 +2501,7 @@ fn get_tools_schema_json() string {
 		'{"name":"keyboard_control","description":"Control keyboard input on desktop. Requires desktop control to be explicitly enabled.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: type literal text or send raw keys","enum":["type","send"]},"text":{"type":"string","description":"Literal text for type action"},"keys":{"type":"string","description":"Raw SendKeys pattern for send action (e.g. ^l, {ENTER})"}},"required":["action"]}},' +
 		'{"name":"capture_screen","description":"Capture desktop screenshot and save to a PNG file. Requires screen capture to be explicitly enabled.","input_schema":{"type":"object","properties":{"path":{"type":"string","description":"Output file path (.png). If omitted, temp path is used."},"x":{"type":"integer","description":"Region X (optional)"},"y":{"type":"integer","description":"Region Y (optional)"},"width":{"type":"integer","description":"Region width (optional, with height)"},"height":{"type":"integer","description":"Region height (optional, with width)"}},"required":[]}},' +
 		'{"name":"screen_analyze","description":"Capture screen (or use existing image path) then call MCP understand_image to analyze it.","input_schema":{"type":"object","properties":{"image_path":{"type":"string","description":"Existing image file path. If omitted, screen is captured first."},"prompt":{"type":"string","description":"Analysis instruction sent to understand_image"},"x":{"type":"integer","description":"Region X for capture when image_path omitted"},"y":{"type":"integer","description":"Region Y for capture when image_path omitted"},"width":{"type":"integer","description":"Region width for capture when image_path omitted"},"height":{"type":"integer","description":"Region height for capture when image_path omitted"}},"required":[]}},' +
+		'{"name":"match_sop","description":"Find the best matching global SOP for the current task before taking action. Returns the top matching SOP name, file path, score, and matched terms so you can read the SOP file next.","input_schema":{"type":"object","properties":{"task":{"type":"string","description":"The user task, subtask, or current objective to match against available SOPs."},"limit":{"type":"integer","description":"Optional number of top matches to return. Default 3."}},"required":["task"]}},' +
 		'{"name":"record_experience","description":"Record an experience into the local knowledge base and trigger configured automation such as syncing global skills and SOPs. You can either pass payload using the same formats as experience add, or provide structured fields directly.","input_schema":{"type":"object","properties":{"payload":{"type":"string","description":"Optional full payload in JSON, key=value, or pipe format."},"skill":{"type":"string","description":"Skill or domain name."},"title":{"type":"string","description":"Short title of the experience."},"scenario":{"type":"string","description":"Context or triggering scenario."},"action":{"type":"string","description":"Action taken."},"action_taken":{"type":"string","description":"Alias for action."},"outcome":{"type":"string","description":"Observed result."},"tags":{"type":"string","description":"Comma-separated tags."},"confidence":{"type":"integer","description":"Confidence from 1 to 5."},"source":{"type":"string","description":"Optional source label."}},"required":[]}},' +
 		'{"name":"session_note","description":"Persistent memory across sessions. Use this to save important context, decisions, project info, or user preferences that should be remembered in future sessions. Actions: read (get all notes), write (overwrite notes), append (add to notes).","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"The action: read, write, or append","enum":["read","write","append"]},"content":{"type":"string","description":"Content to write/append (required for write and append actions)"}},"required":["action"]}},' +
 		'{"name":"task_done","description":"Signal that the current task is complete. Call this tool when you have finished the user\'s request and want to provide a final summary. This will end the agent loop.","input_schema":{"type":"object","properties":{"result":{"type":"string","description":"A concise summary of what was accomplished"}},"required":["result"]}},' +
@@ -2614,6 +2616,11 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string) string {
 		'screen_analyze' {
 			return 'Error: screen_analyze requires MCP-enabled execution context'
 		}
+		'match_sop' {
+			task := tool.input['task'] or { '' }
+			limit := parse_int_input(tool.input, 'limit', 3)
+			return match_sop(task, limit)
+		}
 		'record_experience' {
 			return record_experience_from_tool_input(tool.input)
 		}
@@ -2726,9 +2733,10 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string)
 
 	// Try builtin tools first
 	builtin_names := ['str_replace_editor', 'bash', 'read_file', 'write_file', 'list_dir',
-		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'record_experience',
-		'session_note', 'task_done', 'grep_search', 'find_files', 'sequentialthinking', 'json_edit',
-		'ask_user', 'update_working_checkpoint', 'todo_manager', 'read_many_files', 'activate_skill']
+		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'match_sop',
+		'record_experience', 'session_note', 'task_done', 'grep_search', 'find_files',
+		'sequentialthinking', 'json_edit', 'ask_user', 'update_working_checkpoint', 'todo_manager',
+		'read_many_files', 'activate_skill']
 	if tool.name in builtin_names {
 		return execute_tool_use_in_workspace(tool, workspace)
 	}

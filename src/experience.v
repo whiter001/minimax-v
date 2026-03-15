@@ -9,6 +9,7 @@ const experience_sop_auto_begin = '<!-- BEGIN AUTO-GENERATED SOP -->'
 const experience_sop_auto_end = '<!-- END AUTO-GENERATED SOP -->'
 const max_skill_sync_records = 12
 const max_skill_sync_rules = 6
+const max_sop_metadata_entries = 24
 const experience_sync_mode_balanced = 'balanced'
 const experience_sync_mode_concise = 'concise'
 const experience_sync_mode_strict = 'strict'
@@ -1341,21 +1342,339 @@ fn sync_sop_from_knowledge(arg string) string {
 	return sync_sop_from_knowledge_with_paths(target, mode, get_global_sops_dir(), get_experience_jsonl_path())
 }
 
-fn list_sops_text_with_root(sop_root string) string {
+fn list_sop_names_with_root(sop_root string) []string {
 	if !os.is_dir(sop_root) {
-		return '暂无全局 SOP'
+		return []string{}
 	}
-	entries := os.ls(sop_root) or { return 'Error: ${err.msg()}' }
+	entries := os.ls(sop_root) or { return []string{} }
 	mut names := []string{}
 	for entry in entries {
 		if os.is_file(sop_file_path(entry, sop_root)) {
 			names << entry
 		}
 	}
+	names.sort()
+	return names
+}
+
+fn build_sops_metadata_with_root(sop_root string) string {
+	names := list_sop_names_with_root(sop_root)
+	if names.len == 0 {
+		return ''
+	}
+	mut lines := [
+		'Available SOPs (when a task matches, read the SOP file with read_file before taking action):',
+	]
+	limit := if names.len > max_sop_metadata_entries { max_sop_metadata_entries } else { names.len }
+	for name in names[..limit] {
+		lines << '  - ${name}: ${sop_file_path(name, sop_root)}'
+	}
+	if names.len > limit {
+		lines << '  - ... ${names.len - limit} more SOPs omitted for brevity'
+	}
+	return lines.join('\n')
+}
+
+fn build_sops_metadata() string {
+	return build_sops_metadata_with_root(get_global_sops_dir())
+}
+
+fn normalize_sop_match_text(text string) string {
+	mut out := []rune{}
+	for ch in text.to_lower().runes() {
+		if (ch >= `a` && ch <= `z`) || (ch >= `0` && ch <= `9`) || ch > 127 {
+			out << ch
+		} else {
+			out << ` `
+		}
+	}
+	return out.string()
+}
+
+fn extract_sop_match_terms(text string) []string {
+	normalized := normalize_sop_match_text(text)
+	mut terms := []string{}
+	for token in normalized.split(' ') {
+		trimmed := token.trim_space()
+		if trimmed.len >= 2 && trimmed !in terms {
+			terms << trimmed
+		}
+	}
+	mut rune_terms := []string{}
+	for token in terms {
+		runes := token.runes()
+		if runes.len >= 2 {
+			for i := 0; i < runes.len - 1; i++ {
+				chunk := runes[i..i + 2].string()
+				if chunk !in rune_terms {
+					rune_terms << chunk
+				}
+			}
+		}
+	}
+	for chunk in rune_terms {
+		if chunk !in terms {
+			terms << chunk
+		}
+	}
+	return terms
+}
+
+fn collect_skill_match_context(skill_name string, jsonl_path string) (string, string) {
+	records := records_for_skill(skill_name, jsonl_path)
+	mut parts := []string{}
+	mut tags := []string{}
+	for record in records {
+		if record.title.len > 0 {
+			parts << record.title
+		}
+		if record.scenario.len > 0 {
+			parts << record.scenario
+		}
+		if record.action_taken.len > 0 {
+			parts << record.action_taken
+		}
+		if record.outcome.len > 0 {
+			parts << record.outcome
+		}
+		for raw_tag in record.tags.split(',') {
+			tag := raw_tag.trim_space()
+			if tag.len == 0 {
+				continue
+			}
+			if tag !in tags {
+				tags << tag
+			}
+		}
+	}
+	return parts.join(' '), tags.join(' ')
+}
+
+struct SopScoreBreakdown {
+mut:
+	exact_query     int
+	skill_name      int
+	experience_tags int
+	experience_text int
+	sop_body        int
+}
+
+fn (breakdown SopScoreBreakdown) total() int {
+	return breakdown.exact_query + breakdown.skill_name + breakdown.experience_tags +
+		breakdown.experience_text + breakdown.sop_body
+}
+
+fn (breakdown SopScoreBreakdown) to_summary() string {
+	return 'exact_query=${breakdown.exact_query}, skill_name=${breakdown.skill_name}, experience_tags=${breakdown.experience_tags}, experience_text=${breakdown.experience_text}, sop_body=${breakdown.sop_body}'
+}
+
+fn looks_like_compound_sop_task(task string) bool {
+	trimmed := normalize_sop_match_text(task)
+	markers := [' 然后 ', ' 并且 ', ' 以及 ', ' 同时 ', ' 再 ', ' and ', ' then ', ' after ',
+		' before ', ' next ']
+	for marker in markers {
+		if trimmed.contains(marker.trim_space()) || trimmed.contains(marker) {
+			return true
+		}
+	}
+	return false
+}
+
+fn recommended_sop_read_count(task string, results []SopMatchResult, max_results int) int {
+	if results.len == 0 {
+		return 0
+	}
+	if max_results <= 1 {
+		return 1
+	}
+	compound := looks_like_compound_sop_task(task)
+	top_score := if results[0].score > 0 { results[0].score } else { 1 }
+	threshold := if compound { 40 } else { 75 }
+	mut count := 1
+	for idx in 1 .. results.len {
+		if count >= max_results || count >= 3 {
+			break
+		}
+		if results[idx].score * 100 >= top_score * threshold {
+			count++
+		}
+	}
+	if compound && count == 1 && results.len > 1 && results[1].score * 100 >= top_score * 25 {
+		count = 2
+	}
+	return count
+}
+
+fn sop_match_score(query string, skill_name string, experience_text string, experience_tags string, content string) (SopScoreBreakdown, []string, []string) {
+	trimmed_query := query.trim_space()
+	if trimmed_query.len == 0 {
+		return SopScoreBreakdown{}, []string{}, []string{}
+	}
+	normalized_query := normalize_sop_match_text(trimmed_query)
+	normalized_name := normalize_sop_match_text(skill_name)
+	normalized_experience := normalize_sop_match_text(experience_text)
+	normalized_tags := normalize_sop_match_text(experience_tags)
+	normalized_content := normalize_sop_match_text(content)
+	mut breakdown := SopScoreBreakdown{}
+	mut matched := []string{}
+	mut layers := []string{}
+	if normalized_query.len > 0 && normalized_name.contains(normalized_query) {
+		breakdown.exact_query += 120
+		matched << trimmed_query
+		layers << 'skill_name'
+	} else if normalized_query.len > 0 && normalized_tags.contains(normalized_query) {
+		breakdown.exact_query += 100
+		matched << trimmed_query
+		layers << 'experience_tags'
+	} else if normalized_query.len > 0 && normalized_experience.contains(normalized_query) {
+		breakdown.exact_query += 90
+		matched << trimmed_query
+		layers << 'experience_text'
+	} else if normalized_query.len > 0 && normalized_content.contains(normalized_query) {
+		breakdown.exact_query += 70
+		matched << trimmed_query
+		layers << 'sop_body'
+	}
+	terms := extract_sop_match_terms(trimmed_query)
+	for term in terms {
+		mut matched_this_term := false
+		if normalized_name.contains(term) {
+			breakdown.skill_name += if term.len >= 4 { 24 } else { 14 }
+			matched_this_term = true
+			if 'skill_name' !in layers {
+				layers << 'skill_name'
+			}
+		}
+		if normalized_tags.contains(term) {
+			breakdown.experience_tags += if term.len >= 4 { 18 } else { 12 }
+			matched_this_term = true
+			if 'experience_tags' !in layers {
+				layers << 'experience_tags'
+			}
+		}
+		if normalized_experience.contains(term) {
+			breakdown.experience_text += if term.len >= 4 { 12 } else { 7 }
+			matched_this_term = true
+			if 'experience_text' !in layers {
+				layers << 'experience_text'
+			}
+		}
+		if normalized_content.contains(term) {
+			breakdown.sop_body += if term.len >= 4 { 8 } else { 4 }
+			matched_this_term = true
+			if 'sop_body' !in layers {
+				layers << 'sop_body'
+			}
+		}
+		if matched_this_term && term !in matched {
+			matched << term
+		}
+	}
+	return breakdown, matched, layers
+}
+
+struct SopMatchResult {
+	skill_name      string
+	path            string
+	score           int
+	score_breakdown SopScoreBreakdown
+	matched_terms   []string
+	matched_layers  []string
+}
+
+fn match_sop_with_paths(task string, sop_root string, jsonl_path string, limit int) string {
+	trimmed_task := task.trim_space()
+	if trimmed_task.len == 0 {
+		return 'Error: task is required'
+	}
+	names := list_sop_names_with_root(sop_root)
+	if names.len == 0 {
+		return 'No SOPs available.'
+	}
+	mut results := []SopMatchResult{}
+	for name in names {
+		path := sop_file_path(name, sop_root)
+		content := os.read_file(path) or { '' }
+		experience_text, experience_tags := collect_skill_match_context(name, jsonl_path)
+		breakdown, matched, layers := sop_match_score(trimmed_task, name, experience_text,
+			experience_tags, content)
+		score := breakdown.total()
+		if score > 0 {
+			results << SopMatchResult{
+				skill_name:      name
+				path:            path
+				score:           score
+				score_breakdown: breakdown
+				matched_terms:   matched
+				matched_layers:  layers
+			}
+		}
+	}
+	if results.len == 0 {
+		return 'No relevant SOP found for task: ${trimmed_task}'
+	}
+	results.sort_with_compare(fn (a &SopMatchResult, b &SopMatchResult) int {
+		if a.score == b.score {
+			if a.skill_name < b.skill_name {
+				return -1
+			}
+			if a.skill_name > b.skill_name {
+				return 1
+			}
+			return 0
+		}
+		if a.score > b.score {
+			return -1
+		}
+		return 1
+	})
+	max_results := if limit > 0 && limit < results.len { limit } else { results.len }
+	mut lines := ['Best SOP matches for task: ${trimmed_task}']
+	strategy := if recommended_sop_read_count(trimmed_task, results[..max_results], max_results) > 1 {
+		'multi_sop_sequence'
+	} else {
+		'single_sop_first'
+	}
+	read_count := recommended_sop_read_count(trimmed_task, results[..max_results], max_results)
+	lines << 'strategy: ${strategy}'
+	lines << 'suggested_read_order:'
+	for idx, result in results[..read_count] {
+		lines << '${idx + 1}. ${result.skill_name} | ${result.path} | score=${result.score}'
+	}
+	lines << ''
+	for idx, result in results[..max_results] {
+		prefix := if idx == 0 { 'TOP' } else { 'ALT ${idx}' }
+		lines << '${prefix}: ${result.skill_name}'
+		lines << 'path: ${result.path}'
+		lines << 'score: ${result.score}'
+		lines << 'score_breakdown: ${result.score_breakdown.to_summary()}'
+		if result.matched_terms.len > 0 {
+			lines << 'matched_terms: ${result.matched_terms.join(', ')}'
+		}
+		if result.matched_layers.len > 0 {
+			lines << 'matched_layers: ${result.matched_layers.join(', ')}'
+		}
+		if idx + 1 < max_results {
+			lines << ''
+		}
+	}
+	return lines.join('\n')
+}
+
+fn match_sop_with_root(task string, sop_root string, limit int) string {
+	return match_sop_with_paths(task, sop_root, get_experience_jsonl_path(), limit)
+}
+
+fn match_sop(task string, limit int) string {
+	return match_sop_with_paths(task, get_global_sops_dir(), get_experience_jsonl_path(),
+		limit)
+}
+
+fn list_sops_text_with_root(sop_root string) string {
+	names := list_sop_names_with_root(sop_root)
 	if names.len == 0 {
 		return '暂无全局 SOP'
 	}
-	names.sort()
 	mut lines := ['📘 全局 SOP:']
 	for name in names {
 		lines << '- ${name} | ${sop_file_path(name, sop_root)}'

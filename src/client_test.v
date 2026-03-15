@@ -1,5 +1,7 @@
 module main
 
+import os
+
 // ===== estimate_tokens =====
 
 fn test_estimate_tokens_empty() {
@@ -556,6 +558,33 @@ fn test_build_request_json_auto_skills_adds_instruction() {
 	json := client.build_request_json()
 	assert json.contains('proactively call the activate_skill tool yourself')
 	assert json.contains('call record_experience if you verified a stable fix')
+}
+
+fn test_build_request_json_auto_check_sops_adds_metadata_and_instruction() {
+	tmp_root := os.join_path(os.temp_dir(), 'minimax_client_test_sops_${os.getpid()}')
+	sop_dir := os.join_path(tmp_root, 'sops', 'wechat-mp-draft-publisher')
+	os.mkdir_all(sop_dir) or { panic(err) }
+	os.write_file(os.join_path(sop_dir, 'SOP.md'), '# SOP\n\n先检查草稿箱状态') or {
+		panic(err)
+	}
+	os.setenv('MINIMAX_CONFIG_HOME', tmp_root, true)
+	defer {
+		os.unsetenv('MINIMAX_CONFIG_HOME')
+		os.rmdir_all(tmp_root) or {}
+	}
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	config.auto_check_sops = true
+	mut client := new_api_client(config)
+	client.add_message('user', '请帮我处理微信公众号草稿')
+	json := client.build_request_json()
+	assert json.contains('Available SOPs')
+	assert json.contains('wechat-mp-draft-publisher')
+	assert json.contains('proactively call the match_sop tool')
+	assert json.contains('follow the suggested_read_order')
+	assert json.contains('read the recommended SOP files with the read_file tool')
+	assert json.contains('"name":"match_sop"')
 }
 
 fn test_build_request_json_includes_working_checkpoint() {

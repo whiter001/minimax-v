@@ -87,6 +87,10 @@
 - 同名覆盖优先级。
 - 技能切换和元数据注入。
 
+### [src/experience.v](../src/experience.v)
+
+除经验库读写外，还负责全局 SOP 的生成、列出、展示，以及为请求构造阶段提供 SOP 元数据摘要。
+
 ### [src/commands.v](../src/commands.v)
 
 负责命令模板与扩展安装：

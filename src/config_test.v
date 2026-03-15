@@ -46,8 +46,9 @@ fn test_parse_config_auto_skills_enables_tools() {
 }
 
 fn test_parse_config_experience_automation_fields() {
-	content := 'auto_write_skills=false\nauto_upgrade_sops=false\nknowledge_sync_mode=strict'
+	content := 'auto_check_sops=false\nauto_write_skills=false\nauto_upgrade_sops=false\nknowledge_sync_mode=strict'
 	config := parse_config_content(content, default_config())
+	assert config.auto_check_sops == false
 	assert config.auto_write_skills == false
 	assert config.auto_upgrade_sops == false
 	assert config.knowledge_sync_mode == 'strict'
@@ -116,7 +117,7 @@ fn test_parse_config_workspace() {
 }
 
 fn test_parse_config_all_fields() {
-	content := 'api_key=sk-all\napi_url=https://custom.api\nmodel=Custom-Model\ntemperature=1.0\nmax_tokens=5000\nsystem_prompt=Be helpful\nenable_tools=true\nauto_skills=true\nauto_write_skills=false\nauto_upgrade_sops=false\nknowledge_sync_mode=concise\nenable_desktop_control=true\nenable_screen_capture=true\ndebug=true\nmax_rounds=100\ntoken_limit=50000\nworkspace=/tmp'
+	content := 'api_key=sk-all\napi_url=https://custom.api\nmodel=Custom-Model\ntemperature=1.0\nmax_tokens=5000\nsystem_prompt=Be helpful\nenable_tools=true\nauto_skills=true\nauto_check_sops=false\nauto_write_skills=false\nauto_upgrade_sops=false\nknowledge_sync_mode=concise\nenable_desktop_control=true\nenable_screen_capture=true\ndebug=true\nmax_rounds=100\ntoken_limit=50000\nworkspace=/tmp'
 	config := parse_config_content(content, default_config())
 	assert config.api_key == 'sk-all'
 	assert config.api_url == 'https://custom.api'
@@ -126,6 +127,7 @@ fn test_parse_config_all_fields() {
 	assert config.system_prompt == 'Be helpful'
 	assert config.enable_tools == true
 	assert config.auto_skills == true
+	assert config.auto_check_sops == false
 	assert config.auto_write_skills == false
 	assert config.auto_upgrade_sops == false
 	assert config.knowledge_sync_mode == 'concise'
@@ -171,6 +173,7 @@ fn test_default_config() {
 	assert config.token_limit == 80000
 	assert config.enable_tools == false
 	assert config.auto_skills == false
+	assert config.auto_check_sops == true
 	assert config.auto_write_skills == true
 	assert config.auto_upgrade_sops == true
 	assert config.knowledge_sync_mode == 'balanced'
@@ -208,6 +211,7 @@ fn test_apply_env_override_supports_advanced_fields() {
 	apply_env_override(mut config, 'MINIMAX_TOKEN_LIMIT', '120000')
 	apply_env_override(mut config, 'MINIMAX_SYSTEM_PROMPT', 'Be concise')
 	apply_env_override(mut config, 'MINIMAX_AUTO_SKILLS', '1')
+	apply_env_override(mut config, 'MINIMAX_AUTO_CHECK_SOPS', '0')
 	apply_env_override(mut config, 'MINIMAX_AUTO_WRITE_SKILLS', '0')
 	apply_env_override(mut config, 'MINIMAX_AUTO_UPGRADE_SOPS', '0')
 	apply_env_override(mut config, 'MINIMAX_KNOWLEDGE_SYNC_MODE', 'strict')
@@ -219,6 +223,7 @@ fn test_apply_env_override_supports_advanced_fields() {
 	assert config.token_limit == 120000
 	assert config.system_prompt == 'Be concise'
 	assert config.auto_skills
+	assert !config.auto_check_sops
 	assert !config.auto_write_skills
 	assert !config.auto_upgrade_sops
 	assert config.knowledge_sync_mode == 'strict'
