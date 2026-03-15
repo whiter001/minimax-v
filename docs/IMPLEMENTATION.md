@@ -149,7 +149,7 @@
 
 测试文件基本遵循一一对应：
 
-- 主模块对应的单测放在 src 下，命名为 *_test.v。
+- 主模块对应的单测放在 src 下，命名为 \*\_test.v。
 - Shell 集成测试放在 tests 下。
 - 根目录的 build.sh、integration_test.sh、comprehensive_test.sh 是常用入口。
 

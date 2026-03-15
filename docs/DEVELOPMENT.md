@@ -16,7 +16,7 @@
 v -enable-globals -o minimax_cli src/
 ```
 
-必须带 -enable-globals，因为项目显式使用了多个 __global 变量。
+必须带 -enable-globals，因为项目显式使用了多个 \_\_global 变量。
 
 ### 生产构建
 

@@ -74,7 +74,7 @@ fn test_parse_config_max_tokens_out_of_range() {
 	content := 'max_tokens=1000001'
 	config := parse_config_content(content, default_config())
 	// Out of range — should keep default
-	assert config.max_tokens == 200000
+	assert config.max_tokens == 102400
 }
 
 fn test_parse_config_max_rounds() {
@@ -155,7 +155,7 @@ fn test_default_config() {
 	assert config.api_url == 'https://api.minimaxi.com/anthropic/v1/messages'
 	assert config.model == 'MiniMax-M2.5'
 	assert config.temperature == 0.7
-	assert config.max_tokens == 200000
+	assert config.max_tokens == 102400
 	assert config.max_rounds == 5000
 	assert config.token_limit == 80000
 	assert config.enable_tools == false
@@ -212,7 +212,7 @@ fn test_apply_env_override_rejects_invalid_numeric_values() {
 	apply_env_override(mut config, 'MINIMAX_MAX_ROUNDS', '5001')
 	apply_env_override(mut config, 'MINIMAX_TOKEN_LIMIT', '0')
 	apply_env_override(mut config, 'MINIMAX_TEMPERATURE', '3.0')
-	assert config.max_tokens == 200000
+	assert config.max_tokens == 102400
 	assert config.max_rounds == 5000
 	assert config.token_limit == 80000
 	assert config.temperature == 0.7

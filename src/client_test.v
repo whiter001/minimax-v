@@ -63,7 +63,7 @@ fn test_build_request_json_basic() {
 	client.add_message('user', 'hello')
 	json := client.build_request_json()
 	assert json.contains('"model":"MiniMax-M2.5"')
-	assert json.contains('"max_tokens":200000')
+	assert json.contains('"max_tokens":102400')
 	assert json.contains('"role":"user"')
 	assert json.contains('"content":"hello"')
 }

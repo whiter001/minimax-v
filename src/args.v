@@ -240,7 +240,7 @@ fn build_help_text() string {
 		'  api_key=sk-cp-xxx              API Key（必填）',
 		'  model=MiniMax-M2.5',
 		'  temperature=0.7',
-		'  max_tokens=200000',
+		'  max_tokens=102400',
 		'  enable_tools=true',
 		'  auto_skills=false',
 		'  enable_desktop_control=false',
