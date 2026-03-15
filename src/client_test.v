@@ -98,6 +98,7 @@ fn test_build_request_json_with_tools() {
 	json := client.build_request_json()
 	assert json.contains('"tools":')
 	assert json.contains('"name":"read_file"')
+	assert json.contains('call record_experience if you verified a stable fix')
 }
 
 fn test_build_request_json_with_workspace() {
@@ -132,6 +133,7 @@ fn test_build_request_json_custom_prompt_overrides_agent() {
 	json := client.build_request_json()
 	assert json.contains('Custom prompt')
 	assert !json.contains('helpful AI assistant')
+	assert json.contains('call record_experience if you verified a stable fix')
 }
 
 fn test_build_request_json_content_json_message() {
@@ -553,6 +555,7 @@ fn test_build_request_json_auto_skills_adds_instruction() {
 	client.add_message('user', '请帮我管理后台任务')
 	json := client.build_request_json()
 	assert json.contains('proactively call the activate_skill tool yourself')
+	assert json.contains('call record_experience if you verified a stable fix')
 }
 
 fn test_build_request_json_includes_working_checkpoint() {

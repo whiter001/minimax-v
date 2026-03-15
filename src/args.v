@@ -195,6 +195,10 @@ fn build_help_text() string {
 		'  skills reload                  重新扫描自定义技能',
 		'  skills create <name>           创建自定义技能模板',
 		'  skills sync <name|all> [mode]  同步全局 skill，mode=concise|balanced|strict',
+		'  sops                          查看 SOP 命令帮助',
+		'  sops list                     列出全局 SOP',
+		'  sops show <name>              查看指定全局 SOP 内容',
+		'  sops sync <name|all> [mode]    升级全局 SOP，mode=concise|balanced|strict',
 		'  skill <name>                   切换到指定技能',
 		'  experience                     查看经验库命令帮助',
 		'  experience add                 启动交互式经验录入向导',
@@ -243,6 +247,9 @@ fn build_help_text() string {
 		'  max_tokens=102400',
 		'  enable_tools=true',
 		'  auto_skills=false',
+		'  auto_write_skills=true',
+		'  auto_upgrade_sops=true',
+		'  knowledge_sync_mode=balanced',
 		'  enable_desktop_control=false',
 		'  enable_screen_capture=false',
 		'  enable_logging=true',
@@ -263,6 +270,9 @@ fn print_help() {
 	println('  MINIMAX_SYSTEM_PROMPT          系统提示词')
 	println('  MINIMAX_ENABLE_TOOLS           启用AI工具 (true/1)')
 	println('  MINIMAX_AUTO_SKILLS            自动暴露并激活匹配的 skills (true/1)')
+	println('  MINIMAX_AUTO_WRITE_SKILLS      experience add 后自动写入全局 skills (true/1)')
+	println('  MINIMAX_AUTO_UPGRADE_SOPS      experience add 后自动升级全局 SOP (true/1)')
+	println('  MINIMAX_KNOWLEDGE_SYNC_MODE    经验同步模式 concise|balanced|strict')
 	println('  MINIMAX_ENABLE_DESKTOP_CONTROL 启用鼠标/键盘控制 (true/1)')
 	println('  MINIMAX_ENABLE_SCREEN_CAPTURE  启用屏幕截图 (true/1)')
 	println('  MINIMAX_ENABLE_LOGGING         启用文件日志 (true/1)')

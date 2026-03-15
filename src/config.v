@@ -25,6 +25,9 @@ pub mut:
 	system_prompt          string
 	enable_tools           bool
 	auto_skills            bool
+	auto_write_skills      bool
+	auto_upgrade_sops      bool
+	knowledge_sync_mode    string
 	enable_desktop_control bool
 	enable_screen_capture  bool
 	enable_logging         bool
@@ -44,6 +47,9 @@ fn default_config() Config {
 		system_prompt:          ''
 		enable_tools:           false
 		auto_skills:            false
+		auto_write_skills:      true
+		auto_upgrade_sops:      true
+		knowledge_sync_mode:    'balanced'
 		enable_desktop_control: false
 		enable_screen_capture:  false
 		enable_logging:         false
@@ -155,6 +161,18 @@ fn parse_config_content(content string, base Config) Config {
 						config.enable_tools = true
 					}
 				}
+				'auto_write_skills' {
+					config.auto_write_skills = val == 'true' || val == '1'
+				}
+				'auto_upgrade_sops' {
+					config.auto_upgrade_sops = val == 'true' || val == '1'
+				}
+				'knowledge_sync_mode' {
+					trimmed_mode := val.trim_space().to_lower()
+					if trimmed_mode in ['concise', 'balanced', 'strict'] {
+						config.knowledge_sync_mode = trimmed_mode
+					}
+				}
 				'enable_desktop_control' {
 					config.enable_desktop_control = val == 'true' || val == '1'
 				}
@@ -238,6 +256,15 @@ fn apply_env_overrides(mut config Config) {
 	if val := os.getenv_opt('MINIMAX_AUTO_SKILLS') {
 		apply_env_override(mut config, 'MINIMAX_AUTO_SKILLS', val)
 	}
+	if val := os.getenv_opt('MINIMAX_AUTO_WRITE_SKILLS') {
+		apply_env_override(mut config, 'MINIMAX_AUTO_WRITE_SKILLS', val)
+	}
+	if val := os.getenv_opt('MINIMAX_AUTO_UPGRADE_SOPS') {
+		apply_env_override(mut config, 'MINIMAX_AUTO_UPGRADE_SOPS', val)
+	}
+	if val := os.getenv_opt('MINIMAX_KNOWLEDGE_SYNC_MODE') {
+		apply_env_override(mut config, 'MINIMAX_KNOWLEDGE_SYNC_MODE', val)
+	}
 	if val := os.getenv_opt('MINIMAX_WORKSPACE') {
 		apply_env_override(mut config, 'MINIMAX_WORKSPACE', val)
 	}
@@ -278,6 +305,18 @@ fn apply_env_override(mut config Config, key string, value string) {
 			config.auto_skills = value == 'true' || value == '1'
 			if config.auto_skills {
 				config.enable_tools = true
+			}
+		}
+		'MINIMAX_AUTO_WRITE_SKILLS' {
+			config.auto_write_skills = value == 'true' || value == '1'
+		}
+		'MINIMAX_AUTO_UPGRADE_SOPS' {
+			config.auto_upgrade_sops = value == 'true' || value == '1'
+		}
+		'MINIMAX_KNOWLEDGE_SYNC_MODE' {
+			trimmed_mode := value.trim_space().to_lower()
+			if trimmed_mode in ['concise', 'balanced', 'strict'] {
+				config.knowledge_sync_mode = trimmed_mode
 			}
 		}
 		'MINIMAX_ENABLE_DESKTOP_CONTROL' {

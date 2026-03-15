@@ -107,6 +107,14 @@ fn handle_interactive_exact_command(mut client ApiClient, trimmed string) Intera
 			println(experience_help_text())
 			return .continue_loop
 		}
+		'sops' {
+			println(sops_help_text())
+			return .continue_loop
+		}
+		'sops list' {
+			println(list_sops_text())
+			return .continue_loop
+		}
 		'experience add' {
 			println(experience_add_wizard())
 			return .continue_loop
@@ -299,6 +307,16 @@ fn handle_interactive_prefixed_command(mut client ApiClient, trimmed string) Int
 	if trimmed.starts_with('skills sync ') {
 		sync_target := trimmed['skills sync '.len..].trim_space()
 		println(sync_skill_from_knowledge(sync_target))
+		return .continue_loop
+	}
+	if trimmed.starts_with('sops sync ') {
+		sync_target := trimmed['sops sync '.len..].trim_space()
+		println(sync_sop_from_knowledge(sync_target))
+		return .continue_loop
+	}
+	if trimmed.starts_with('sops show ') {
+		skill_name := trimmed['sops show '.len..].trim_space()
+		println(show_sop_text(skill_name))
 		return .continue_loop
 	}
 	if trimmed.starts_with('experience add ') {

@@ -187,6 +187,39 @@ fn test_execute_tool_use_with_workspace() {
 	assert result == 'workspace file'
 }
 
+fn test_execute_tool_use_record_experience() {
+	test_dir := '/tmp/__minimax_tool_record_experience__'
+	os.mkdir_all(test_dir) or {}
+	os.setenv('MINIMAX_CONFIG_HOME', test_dir, true)
+	defer {
+		os.unsetenv('MINIMAX_CONFIG_HOME')
+		os.rmdir_all(test_dir) or {}
+	}
+
+	tool := ToolUse{
+		id:    'tu_exp_1'
+		name:  'record_experience'
+		input: {
+			'skill':      'browser-ops'
+			'title':      '工具执行经验'
+			'scenario':   '页面已稳定加载'
+			'action':     '等待目标节点后点击'
+			'outcome':    '操作成功执行'
+			'tags':       'browser,tool'
+			'confidence': '5'
+		}
+	}
+	result := execute_tool_use_in_workspace(tool, '')
+	assert result.contains('已记录经验')
+	assert result.contains('已同步 skill')
+	assert result.contains('已升级 SOP')
+	assert os.is_file(os.join_path(test_dir, 'knowledge', 'experiences.jsonl'))
+	assert os.is_file(os.join_path(test_dir, 'skills', 'browser-ops', 'SKILL.md'))
+	assert os.is_file(os.join_path(test_dir, 'sops', 'browser-ops', 'SOP.md'))
+	jsonl := os.read_file(os.join_path(test_dir, 'knowledge', 'experiences.jsonl')) or { '' }
+	assert jsonl.contains('工具执行经验')
+}
+
 fn test_execute_tool_use_unknown() {
 	tool := ToolUse{
 		id:    'tu_1'
@@ -524,6 +557,7 @@ fn test_get_tools_schema_json_valid() {
 	assert json.contains('keyboard_control')
 	assert json.contains('capture_screen')
 	assert json.contains('screen_analyze')
+	assert json.contains('record_experience')
 	assert json.contains('session_note')
 	assert json.contains('task_done')
 	assert json.contains('grep_search')

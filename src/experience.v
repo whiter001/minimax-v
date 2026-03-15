@@ -5,11 +5,21 @@ import time
 
 const experience_skill_auto_begin = '<!-- BEGIN AUTO-GENERATED EXPERIENCE -->'
 const experience_skill_auto_end = '<!-- END AUTO-GENERATED EXPERIENCE -->'
+const experience_sop_auto_begin = '<!-- BEGIN AUTO-GENERATED SOP -->'
+const experience_sop_auto_end = '<!-- END AUTO-GENERATED SOP -->'
 const max_skill_sync_records = 12
 const max_skill_sync_rules = 6
 const experience_sync_mode_balanced = 'balanced'
 const experience_sync_mode_concise = 'concise'
 const experience_sync_mode_strict = 'strict'
+
+struct ExperienceAutomationSettings {
+	auto_write_skills bool
+	auto_upgrade_sops bool
+	sync_mode         string
+	skill_root        string
+	sop_root          string
+}
 
 struct ExperienceRecord {
 mut:
@@ -53,12 +63,42 @@ fn get_global_skills_dir() string {
 	return os.join_path(get_minimax_config_dir(), 'skills')
 }
 
+fn get_global_sops_dir() string {
+	return os.join_path(get_minimax_config_dir(), 'sops')
+}
+
+fn sop_file_path(skill_name string, sop_root string) string {
+	return os.join_path(sop_root, skill_name, 'SOP.md')
+}
+
 fn sqlite_cli_path() string {
 	return os.find_abs_path_of_executable('sqlite3') or { '' }
 }
 
 fn sqlite_cli_available() bool {
 	return sqlite_cli_path().len > 0
+}
+
+fn disabled_experience_automation_settings() ExperienceAutomationSettings {
+	return ExperienceAutomationSettings{
+		auto_write_skills: false
+		auto_upgrade_sops: false
+		sync_mode:         experience_sync_mode_balanced
+		skill_root:        ''
+		sop_root:          ''
+	}
+}
+
+fn load_experience_automation_settings() ExperienceAutomationSettings {
+	mut config := load_config_file()
+	apply_env_overrides(mut config)
+	return ExperienceAutomationSettings{
+		auto_write_skills: config.auto_write_skills
+		auto_upgrade_sops: config.auto_upgrade_sops
+		sync_mode:         normalize_experience_sync_mode(config.knowledge_sync_mode)
+		skill_root:        get_global_skills_dir()
+		sop_root:          get_global_sops_dir()
+	}
 }
 
 fn ensure_experience_storage(jsonl_path string, markdown_dir string) ! {
@@ -190,7 +230,19 @@ fn collect_experience_wizard_record(mut prompter ExperienceWizardPrompter) !Expe
 		tags, confidence, 'wizard')
 }
 
-fn store_experience_record_with_paths(mut record ExperienceRecord, db_path string, jsonl_path string, markdown_dir string) string {
+fn append_experience_automation_results(mut lines []string, record ExperienceRecord, settings ExperienceAutomationSettings, jsonl_path string) {
+	resolved_mode := normalize_experience_sync_mode(settings.sync_mode)
+	if settings.auto_write_skills && settings.skill_root.len > 0 {
+		lines << sync_skill_from_knowledge_with_paths(record.skill_name, resolved_mode,
+			settings.skill_root, jsonl_path)
+	}
+	if settings.auto_upgrade_sops && settings.sop_root.len > 0 {
+		lines << sync_sop_from_knowledge_with_paths(record.skill_name, resolved_mode,
+			settings.sop_root, jsonl_path)
+	}
+}
+
+fn store_experience_record_with_paths_and_automation(mut record ExperienceRecord, db_path string, jsonl_path string, markdown_dir string, settings ExperienceAutomationSettings) string {
 	ensure_experience_storage(jsonl_path, markdown_dir) or { return 'Error: ${err.msg()}' }
 	if sqlite_cli_available() {
 		record.id = insert_experience_sqlite(record, db_path) or { return 'Error: ${err.msg()}' }
@@ -205,14 +257,26 @@ fn store_experience_record_with_paths(mut record ExperienceRecord, db_path strin
 	lines << 'title: ${record.title}'
 	lines << 'confidence: ${record.confidence}'
 	lines << 'store: JSONL + Markdown' + if sqlite_cli_available() { ' + SQLite' } else { '' }
+	append_experience_automation_results(mut lines, record, settings, jsonl_path)
 	return lines.join('\n')
 }
 
-fn experience_add_wizard_with_prompter(mut prompter ExperienceWizardPrompter, db_path string, jsonl_path string, markdown_dir string) string {
+fn store_experience_record_with_paths(mut record ExperienceRecord, db_path string, jsonl_path string, markdown_dir string) string {
+	return store_experience_record_with_paths_and_automation(mut record, db_path, jsonl_path,
+		markdown_dir, disabled_experience_automation_settings())
+}
+
+fn experience_add_wizard_with_prompter_and_automation(mut prompter ExperienceWizardPrompter, db_path string, jsonl_path string, markdown_dir string, settings ExperienceAutomationSettings) string {
 	mut record := collect_experience_wizard_record(mut prompter) or {
 		return if err.msg() == '已取消' { '已取消' } else { 'Error: ${err.msg()}' }
 	}
-	return store_experience_record_with_paths(mut record, db_path, jsonl_path, markdown_dir)
+	return store_experience_record_with_paths_and_automation(mut record, db_path, jsonl_path,
+		markdown_dir, settings)
+}
+
+fn experience_add_wizard_with_prompter(mut prompter ExperienceWizardPrompter, db_path string, jsonl_path string, markdown_dir string) string {
+	return experience_add_wizard_with_prompter_and_automation(mut prompter, db_path, jsonl_path,
+		markdown_dir, disabled_experience_automation_settings())
 }
 
 fn experience_add_wizard_with_paths(db_path string, jsonl_path string, markdown_dir string) string {
@@ -221,14 +285,21 @@ fn experience_add_wizard_with_paths(db_path string, jsonl_path string, markdown_
 	return experience_add_wizard_with_prompter(mut prompter, db_path, jsonl_path, markdown_dir)
 }
 
+fn experience_add_wizard_with_paths_and_automation(db_path string, jsonl_path string, markdown_dir string, settings ExperienceAutomationSettings) string {
+	println('📝 经验录入向导')
+	mut prompter := new_interactive_experience_wizard_prompter()
+	return experience_add_wizard_with_prompter_and_automation(mut prompter, db_path, jsonl_path,
+		markdown_dir, settings)
+}
+
 fn experience_add_wizard_with_scripted_inputs(inputs []string, db_path string, jsonl_path string, markdown_dir string) string {
 	mut prompter := new_scripted_experience_wizard_prompter(inputs)
 	return experience_add_wizard_with_prompter(mut prompter, db_path, jsonl_path, markdown_dir)
 }
 
 fn experience_add_wizard() string {
-	return experience_add_wizard_with_paths(get_experience_db_path(), get_experience_jsonl_path(),
-		get_experience_markdown_dir())
+	return experience_add_wizard_with_paths_and_automation(get_experience_db_path(), get_experience_jsonl_path(),
+		get_experience_markdown_dir(), load_experience_automation_settings())
 }
 
 fn normalize_experience_sync_mode(mode string) string {
@@ -439,14 +510,42 @@ fn insert_experience_sqlite(record ExperienceRecord, db_path string) !int {
 	return output.trim_space().int()
 }
 
-fn record_experience_payload_with_paths(payload string, db_path string, jsonl_path string, markdown_dir string) string {
+fn record_experience_payload_with_paths_and_automation(payload string, db_path string, jsonl_path string, markdown_dir string, settings ExperienceAutomationSettings) string {
 	mut record := parse_experience_payload(payload) or { return 'Error: ${err.msg()}' }
-	return store_experience_record_with_paths(mut record, db_path, jsonl_path, markdown_dir)
+	return store_experience_record_with_paths_and_automation(mut record, db_path, jsonl_path,
+		markdown_dir, settings)
+}
+
+fn record_experience_payload_with_paths(payload string, db_path string, jsonl_path string, markdown_dir string) string {
+	return record_experience_payload_with_paths_and_automation(payload, db_path, jsonl_path,
+		markdown_dir, disabled_experience_automation_settings())
 }
 
 fn record_experience_payload(payload string) string {
-	return record_experience_payload_with_paths(payload, get_experience_db_path(), get_experience_jsonl_path(),
-		get_experience_markdown_dir())
+	return record_experience_payload_with_paths_and_automation(payload, get_experience_db_path(),
+		get_experience_jsonl_path(), get_experience_markdown_dir(), load_experience_automation_settings())
+}
+
+fn record_experience_from_tool_input_with_paths(input map[string]string, db_path string, jsonl_path string, markdown_dir string, settings ExperienceAutomationSettings) string {
+	payload := (input['payload'] or { '' }).trim_space()
+	if payload.len > 0 {
+		return record_experience_payload_with_paths_and_automation(payload, db_path, jsonl_path,
+			markdown_dir, settings)
+	}
+	confidence_text := (input['confidence'] or { '3' }).trim_space()
+	confidence := if confidence_text.len > 0 { confidence_text.int() } else { 3 }
+	mut record := build_experience_record(input['skill'] or { '' }, input['title'] or { '' },
+		input['scenario'] or { '' }, input['action'] or { input['action_taken'] or { '' } },
+		input['outcome'] or { '' }, input['tags'] or { '' }, confidence, input['source'] or {
+		'tool'
+	}) or { return 'Error: ${err.msg()}' }
+	return store_experience_record_with_paths_and_automation(mut record, db_path, jsonl_path,
+		markdown_dir, settings)
+}
+
+fn record_experience_from_tool_input(input map[string]string) string {
+	return record_experience_from_tool_input_with_paths(input, get_experience_db_path(),
+		get_experience_jsonl_path(), get_experience_markdown_dir(), load_experience_automation_settings())
 }
 
 fn load_experience_records_from_jsonl(jsonl_path string) []ExperienceRecord {
@@ -965,10 +1064,150 @@ fn build_skill_generated_block(skill_name string, records []ExperienceRecord, mo
 	return lines.join('\n')
 }
 
-fn upsert_generated_skill_block(content string, generated_block string) string {
-	if start := content.index(experience_skill_auto_begin) {
-		if end := content.index(experience_skill_auto_end) {
-			end_idx := end + experience_skill_auto_end.len
+fn build_primary_sop_steps(records []ExperienceRecord, mode string) []string {
+	resolved_mode := normalize_experience_sync_mode(mode)
+	step_limit := match resolved_mode {
+		experience_sync_mode_concise { 3 }
+		experience_sync_mode_strict { 4 }
+		else { 5 }
+	}
+	mut steps := []string{}
+	for record in records {
+		if !should_include_in_sync_mode(record, resolved_mode) || !looks_like_success(record) {
+			continue
+		}
+		mut step := compact_experience_text(if record.action_taken.len > 0 {
+			record.action_taken
+		} else {
+			record.title
+		}, 100)
+		if record.scenario.len > 0 {
+			step += '。适用场景：' + compact_experience_text(record.scenario, 70)
+		}
+		if record.outcome.len > 0 {
+			step += '。预期结果：' + compact_experience_text(record.outcome, 70)
+		}
+		if step !in steps {
+			steps << step
+		}
+		if steps.len >= step_limit {
+			break
+		}
+	}
+	return steps
+}
+
+fn build_fallback_sop_items(records []ExperienceRecord, mode string) []string {
+	resolved_mode := normalize_experience_sync_mode(mode)
+	item_limit := match resolved_mode {
+		experience_sync_mode_concise { 2 }
+		experience_sync_mode_strict { 4 }
+		else { 4 }
+	}
+	mut items := []string{}
+	for record in records {
+		if !should_include_in_sync_mode(record, resolved_mode) || !looks_like_failure(record) {
+			continue
+		}
+		mut item := compact_experience_text(if record.scenario.len > 0 {
+			record.scenario
+		} else {
+			record.title
+		}, 80)
+		if record.action_taken.len > 0 {
+			item += '；回退：' + compact_experience_text(record.action_taken, 80)
+		}
+		if record.outcome.len > 0 {
+			item += '；原因：' + compact_experience_text(record.outcome, 70)
+		}
+		if item !in items {
+			items << item
+		}
+		if items.len >= item_limit {
+			break
+		}
+	}
+	return items
+}
+
+fn build_sop_generated_block(skill_name string, records []ExperienceRecord, mode string) string {
+	resolved_mode := normalize_experience_sync_mode(mode)
+	primary_steps := build_primary_sop_steps(records, resolved_mode)
+	fallback_items := build_fallback_sop_items(records, resolved_mode)
+	scenarios := top_unique_items(records, 'scenario', if resolved_mode == experience_sync_mode_strict {
+		3
+	} else {
+		4
+	})
+	mut lines := []string{}
+	lines << experience_sop_auto_begin
+	lines << '# Auto-Generated SOP'
+	lines << 'Target: ${skill_name}'
+	lines << 'Mode: ${resolved_mode}'
+	lines << 'This SOP is synthesized from the local experience knowledge base and should be refreshed whenever new evidence is added.'
+	lines << ''
+	lines << '## Preconditions'
+	if scenarios.len == 0 {
+		lines << '- 确认目标环境已就绪，并先观察可见状态再执行关键操作。'
+	} else {
+		for scenario in scenarios {
+			lines << '- ${scenario}'
+		}
+	}
+	lines << ''
+	lines << '## Primary Workflow'
+	if primary_steps.len == 0 {
+		lines << '1. 先确认当前目标流程的可见状态和输入条件。'
+		lines << '2. 选择风险最低、证据最多的执行路径。'
+		lines << '3. 每完成一步就验证结果，避免在未知状态下连续重试。'
+	} else {
+		for idx, step in primary_steps {
+			lines << '${idx + 1}. ${step}'
+		}
+	}
+	lines << ''
+	lines << '## Fallback Workflow'
+	if fallback_items.len == 0 {
+		lines << '- 若主路径失败，优先保留用户可见状态，再切换到更保守的人工或 DOM 级路径。'
+	} else {
+		for item in fallback_items {
+			lines << '- ${item}'
+		}
+	}
+	lines << ''
+	lines << '## Guardrails'
+	lines << '- 不要在失败路径上无限重试；连续失败后应立即切换回退方案。'
+	lines << '- 任何回退动作都应优先保证正文、表单或当前页面状态不被破坏。'
+	lines << '- 执行高风险步骤前，先确认前置条件、权限和可见反馈。'
+	if resolved_mode != experience_sync_mode_strict {
+		lines << ''
+		lines << '## Recent Evidence'
+		evidence_limit := if resolved_mode == experience_sync_mode_concise { 3 } else { records.len }
+		mut shown := 0
+		for record in records {
+			if !should_include_in_sync_mode(record, resolved_mode) {
+				continue
+			}
+			mut line := '- ${record.title}'
+			if record.outcome.len > 0 {
+				line += '；结果：${compact_experience_text(record.outcome, 70)}'
+			}
+			line += '；置信度：${record.confidence}/5'
+			lines << line
+			shown++
+			if shown >= evidence_limit {
+				break
+			}
+		}
+	}
+	lines << experience_sop_auto_end
+	return lines.join('\n')
+}
+
+fn upsert_generated_block(content string, start_marker string, end_marker string, generated_block string) string {
+	if start := content.index(start_marker) {
+		if end := content.index(end_marker) {
+			end_idx := end + end_marker.len
 			suffix := content[end_idx..].trim_left('\n ')
 			mut merged := content[..start].trim_right('\n ') + '\n\n' + generated_block
 			if suffix.len > 0 {
@@ -985,11 +1224,22 @@ fn upsert_generated_skill_block(content string, generated_block string) string {
 	return content.trim_right('\n ') + '\n\n' + generated_block + '\n'
 }
 
+fn upsert_generated_skill_block(content string, generated_block string) string {
+	return upsert_generated_block(content, experience_skill_auto_begin, experience_skill_auto_end,
+		generated_block)
+}
+
 fn default_skill_content(skill_name string, generated_block string) string {
 	return
 		'---\nname: ${skill_name}\ndescription: Auto-generated skill derived from local experience knowledge base\n---\n\n' +
 		'You are a specialized expert for ${skill_name}.\n\n' +
 		'Use the accumulated local experience below as operational guidance. Favor stable, repeatable methods and update this skill when new evidence appears.\n\n' +
+		generated_block + '\n'
+}
+
+fn default_sop_content(skill_name string, generated_block string) string {
+	return '# SOP: ${skill_name}\n\n' +
+		'以下步骤由本地经验库自动总结生成。可以在自动区块外补充手写说明，后续同步只会更新自动区块。\n\n' +
 		generated_block + '\n'
 }
 
@@ -1042,6 +1292,107 @@ fn sync_skill_from_knowledge(arg string) string {
 		get_experience_jsonl_path())
 }
 
+fn sync_sop_from_knowledge_with_paths(skill_name string, mode string, sop_root string, jsonl_path string) string {
+	resolved_mode := normalize_experience_sync_mode(mode)
+	trimmed := skill_name.trim_space()
+	if trimmed.len == 0 {
+		return '用法: sops sync <skill-name|all> [concise|balanced|strict]'
+	}
+	if trimmed == 'all' {
+		mut skill_names := []string{}
+		for record in load_experience_records_from_jsonl(jsonl_path) {
+			if record.skill_name !in skill_names {
+				skill_names << record.skill_name
+			}
+		}
+		if skill_names.len == 0 {
+			return '没有可同步的经验记录'
+		}
+		mut results := []string{}
+		for name in skill_names {
+			results << sync_sop_from_knowledge_with_paths(name, resolved_mode, sop_root,
+				jsonl_path)
+		}
+		return results.join('\n\n')
+	}
+	records := records_for_skill(trimmed, jsonl_path)
+	if records.len == 0 {
+		return '未找到 skill `${trimmed}` 的经验记录'
+	}
+	os.mkdir_all(sop_root) or { return 'Error: ${err.msg()}' }
+	sop_dir := os.join_path(sop_root, trimmed)
+	os.mkdir_all(sop_dir) or { return 'Error: ${err.msg()}' }
+	sop_path := os.join_path(sop_dir, 'SOP.md')
+	generated_block := build_sop_generated_block(trimmed, records, resolved_mode)
+	mut next_content := ''
+	if os.is_file(sop_path) {
+		content := os.read_file(sop_path) or { return 'Error: ${err.msg()}' }
+		next_content = upsert_generated_block(content, experience_sop_auto_begin, experience_sop_auto_end,
+			generated_block)
+	} else {
+		next_content = default_sop_content(trimmed, generated_block)
+	}
+	os.write_file(sop_path, next_content) or { return 'Error: ${err.msg()}' }
+	return '✅ 已升级 SOP: ${trimmed}\nmode: ${resolved_mode}\npath: ${sop_path}\nrecords: ${records.len}'
+}
+
+fn sync_sop_from_knowledge(arg string) string {
+	target, mode := parse_skill_sync_target_and_mode(arg)
+	return sync_sop_from_knowledge_with_paths(target, mode, get_global_sops_dir(), get_experience_jsonl_path())
+}
+
+fn list_sops_text_with_root(sop_root string) string {
+	if !os.is_dir(sop_root) {
+		return '暂无全局 SOP'
+	}
+	entries := os.ls(sop_root) or { return 'Error: ${err.msg()}' }
+	mut names := []string{}
+	for entry in entries {
+		if os.is_file(sop_file_path(entry, sop_root)) {
+			names << entry
+		}
+	}
+	if names.len == 0 {
+		return '暂无全局 SOP'
+	}
+	names.sort()
+	mut lines := ['📘 全局 SOP:']
+	for name in names {
+		lines << '- ${name} | ${sop_file_path(name, sop_root)}'
+	}
+	return lines.join('\n')
+}
+
+fn list_sops_text() string {
+	return list_sops_text_with_root(get_global_sops_dir())
+}
+
+fn show_sop_text_with_root(skill_name string, sop_root string) string {
+	trimmed := skill_name.trim_space()
+	if trimmed.len == 0 {
+		return '用法: sops show <skill-name>'
+	}
+	path := sop_file_path(trimmed, sop_root)
+	if !os.is_file(path) {
+		return '未找到 SOP: ${trimmed}'
+	}
+	content := os.read_file(path) or { return 'Error: ${err.msg()}' }
+	if content.trim_space().len == 0 {
+		return 'SOP 为空: ${trimmed}'
+	}
+	return content
+}
+
+fn show_sop_text(skill_name string) string {
+	return show_sop_text_with_root(skill_name, get_global_sops_dir())
+}
+
+fn sops_help_text() string {
+	return 'SOP 命令:\n' + '  sops list\n' + '  sops show <skill-name>\n' +
+		'  sops sync <skill-name|all> [concise|balanced|strict]\n\n' +
+		'全局 SOP 默认存储在 ~/.config/minimax/sops/<skill>/SOP.md'
+}
+
 fn experience_help_text() string {
 	return '经验库命令:\n' +
 		'  experience add {"skill":"name","title":"...","scenario":"...","action":"...","outcome":"...","tags":"a,b","confidence":4}\n' +
@@ -1049,5 +1400,8 @@ fn experience_help_text() string {
 		'  experience add name | title | scenario | action | outcome | tags | confidence\n' +
 		'  experience list [skill-name]\n' + '  experience show <id>\n' +
 		'  experience search <query>\n' + '  experience prune <id|all|skill <name>>\n' +
-		'  skills sync <skill-name|all> [concise|balanced|strict]'
+		'  sops list\n' + '  sops show <skill-name>\n' +
+		'  skills sync <skill-name|all> [concise|balanced|strict]\n' +
+		'  sops sync <skill-name|all> [concise|balanced|strict]\n\n' +
+		'默认会在 experience add 后自动写入全局 skill 并升级全局 SOP；可通过 config 中 auto_write_skills、auto_upgrade_sops、knowledge_sync_mode 调整。'
 }

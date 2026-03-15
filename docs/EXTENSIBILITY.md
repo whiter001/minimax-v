@@ -143,8 +143,30 @@ Experience 不是模型上下文记忆，而是本地知识沉淀层，用来记
 - experience search
 - experience prune
 - skills sync
+- sops sync
+
+当 AI 处于工具调用模式时，也可以直接调用 `record_experience`，将任务经验写入本地知识库并触发配置好的自动同步。
 
 skills sync 支持 concise、balanced、strict 三种模式，把经验摘要写回技能内容。
+
+sops sync 也支持 concise、balanced、strict 三种模式，把经验摘要升级为全局 SOP 文档。
+
+SOP 还支持以下查看命令：
+
+- `sops`
+- `sops list`
+- `sops show <skill-name>`
+
+默认情况下，experience add 在写入 SQLite/JSONL/Markdown 后，会继续自动执行两步：
+
+- 把当前 skill 的经验同步到 `~/.config/minimax/skills/<skill>/SKILL.md`
+- 把当前 skill 的经验同步到 `~/.config/minimax/sops/<skill>/SOP.md`
+
+可以通过以下配置项调整：
+
+- `auto_write_skills=true|false`
+- `auto_upgrade_sops=true|false`
+- `knowledge_sync_mode=concise|balanced|strict`
 
 ## 文档更新原则
 

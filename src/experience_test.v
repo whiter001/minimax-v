@@ -338,6 +338,39 @@ fn test_build_skill_generated_block_modes_adjust_output() {
 	assert !strict_block.contains('### Recent Evidence')
 }
 
+fn test_build_sop_generated_block_includes_primary_and_fallback_sections() {
+	records := [
+		ExperienceRecord{
+			skill_name:   'wechat-editor-image'
+			title:        '高置信成功路径'
+			scenario:     '编辑器已完成加载'
+			action_taken: '读取剪贴板图片并转 Data URL 注入 ProseMirror'
+			outcome:      '成功插入图片'
+			tags:         'wechat,clipboard,image'
+			confidence:   5
+		},
+		ExperienceRecord{
+			skill_name:   'wechat-editor-image'
+			title:        '低置信失败路径'
+			scenario:     'setInputFiles 返回 Not allowed'
+			action_taken: '提示用户手动上传'
+			outcome:      '避免继续重试'
+			tags:         'wechat,upload,fallback'
+			confidence:   4
+		},
+	]
+
+	block := build_sop_generated_block('wechat-editor-image', records, 'balanced')
+	assert block.contains('# Auto-Generated SOP')
+	assert block.contains('## Preconditions')
+	assert block.contains('## Primary Workflow')
+	assert block.contains('1. 读取剪贴板图片并转 Data URL 注入 ProseMirror')
+	assert block.contains('## Fallback Workflow')
+	assert block.contains('提示用户手动上传')
+	assert block.contains('## Guardrails')
+	assert block.contains('## Recent Evidence')
+}
+
 fn test_sync_skill_from_knowledge_with_paths_all_mode_creates_multiple_skill_files() {
 	base := experience_test_dir('__minimax_skill_sync_all_mode__')
 	os.mkdir_all(base) or {}
@@ -427,6 +460,136 @@ fn test_sync_skill_from_knowledge_preserves_trailing_content() {
 	content := os.read_file(skill_path) or { '' }
 	assert content.contains('保留尾部内容')
 	assert content.contains('Trailing notes.')
+}
+
+fn test_sync_sop_from_knowledge_with_paths_creates_and_updates_sop_file() {
+	base := experience_test_dir('__minimax_sop_sync__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'knowledge')
+	sop_root := os.join_path(base, 'sops-root')
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"剪贴板插图成功","scenario":"编辑器已完成加载","action":"读取剪贴板图片并转Data URL","outcome":"成功插入图片","tags":"wechat,clipboard","confidence":5}',
+		db_path, jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"上传失败后回退","scenario":"setInputFiles 返回 Not allowed","action":"停止重试并提示用户手动上传","outcome":"保留正文内容不回滚","tags":"wechat,upload,fallback","confidence":4}',
+		db_path, jsonl_path, markdown_dir)
+
+	result := sync_sop_from_knowledge_with_paths('wechat-editor-image', 'balanced', sop_root,
+		jsonl_path)
+	assert result.contains('已升级 SOP')
+	assert result.contains('mode: balanced')
+
+	sop_path := os.join_path(sop_root, 'wechat-editor-image', 'SOP.md')
+	assert os.is_file(sop_path)
+	content := os.read_file(sop_path) or { '' }
+	assert content.contains('# SOP: wechat-editor-image')
+	assert content.contains(experience_sop_auto_begin)
+	assert content.contains('## Primary Workflow')
+	assert content.contains('## Fallback Workflow')
+
+	existing := '# SOP: wechat-editor-image\n\n手写说明。\n\n${experience_sop_auto_begin}\nold block\n${experience_sop_auto_end}\n\nTrailing notes.\n'
+	os.write_file(sop_path, existing) or {
+		assert false
+		return
+	}
+	_ = sync_sop_from_knowledge_with_paths('wechat-editor-image', 'strict', sop_root,
+		jsonl_path)
+	updated := os.read_file(sop_path) or { '' }
+	assert updated.contains('手写说明。')
+	assert updated.contains('Trailing notes.')
+	assert !updated.contains('old block')
+	assert updated.contains('Mode: strict')
+}
+
+fn test_record_experience_payload_with_paths_and_automation_syncs_skill_and_sop() {
+	base := experience_test_dir('__minimax_experience_automation__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'knowledge')
+	skill_root := os.join_path(base, 'skills-root')
+	sop_root := os.join_path(base, 'sops-root')
+	settings := ExperienceAutomationSettings{
+		auto_write_skills: true
+		auto_upgrade_sops: true
+		sync_mode:         'balanced'
+		skill_root:        skill_root
+		sop_root:          sop_root
+	}
+
+	result := record_experience_payload_with_paths_and_automation('{"skill":"wechat-editor-image","title":"自动同步","scenario":"编辑器已完成加载","action":"读取剪贴板图片并转Data URL","outcome":"成功插入图片","tags":"wechat,clipboard","confidence":5}',
+		db_path, jsonl_path, markdown_dir, settings)
+	assert result.contains('已记录经验')
+	assert result.contains('已同步 skill')
+	assert result.contains('已升级 SOP')
+	assert os.is_file(os.join_path(skill_root, 'wechat-editor-image', 'SKILL.md'))
+	assert os.is_file(os.join_path(sop_root, 'wechat-editor-image', 'SOP.md'))
+}
+
+fn test_record_experience_from_tool_input_with_paths_accepts_structured_fields() {
+	base := experience_test_dir('__minimax_experience_tool_input__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	db_path := os.join_path(base, 'skills.db')
+	jsonl_path := os.join_path(base, 'experiences.jsonl')
+	markdown_dir := os.join_path(base, 'knowledge')
+	skill_root := os.join_path(base, 'skills-root')
+	sop_root := os.join_path(base, 'sops-root')
+	settings := ExperienceAutomationSettings{
+		auto_write_skills: true
+		auto_upgrade_sops: true
+		sync_mode:         'balanced'
+		skill_root:        skill_root
+		sop_root:          sop_root
+	}
+	result := record_experience_from_tool_input_with_paths({
+		'skill':      'browser-ops'
+		'title':      '工具录入'
+		'scenario':   '页面已稳定加载'
+		'action':     '等待目标节点后点击'
+		'outcome':    '操作成功执行'
+		'tags':       'browser,tool'
+		'confidence': '5'
+	}, db_path, jsonl_path, markdown_dir, settings)
+	assert result.contains('已记录经验')
+	assert result.contains('已同步 skill')
+	assert result.contains('已升级 SOP')
+	assert os.is_file(os.join_path(skill_root, 'browser-ops', 'SKILL.md'))
+	assert os.is_file(os.join_path(sop_root, 'browser-ops', 'SOP.md'))
+	content := os.read_file(jsonl_path) or { '' }
+	assert content.contains('工具录入')
+	assert content.contains('browser-ops')
+}
+
+fn test_list_and_show_sops_with_root() {
+	base := experience_test_dir('__minimax_sops_show_list__')
+	os.mkdir_all(base) or {}
+	defer { os.rmdir_all(base) or {} }
+
+	sop_root := os.join_path(base, 'sops-root')
+	os.mkdir_all(os.join_path(sop_root, 'wechat-editor-image')) or {}
+	path := os.join_path(sop_root, 'wechat-editor-image', 'SOP.md')
+	os.write_file(path, '# SOP: wechat-editor-image\n\nhello sop\n') or {
+		assert false
+		return
+	}
+
+	list_text := list_sops_text_with_root(sop_root)
+	assert list_text.contains('全局 SOP')
+	assert list_text.contains('wechat-editor-image')
+	assert list_text.contains(path)
+
+	show_text := show_sop_text_with_root('wechat-editor-image', sop_root)
+	assert show_text.contains('# SOP: wechat-editor-image')
+	assert show_text.contains('hello sop')
+
+	missing_text := show_sop_text_with_root('missing-skill', sop_root)
+	assert missing_text.contains('未找到 SOP')
 }
 
 fn test_experience_prune_text_with_paths_by_id() {

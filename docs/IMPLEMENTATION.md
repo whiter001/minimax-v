@@ -106,6 +106,8 @@
 - SQLite、JSONL、Markdown 多副本存储。
 - 搜索、展示、清理。
 - skill sync，把经验压缩写回技能文档。
+- SOP sync，把经验升级为全局 SOP 文档。
+- experience add 后按配置自动触发全局 skill 与 SOP 同步。
 
 ## 用户界面层
 

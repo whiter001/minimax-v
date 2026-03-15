@@ -101,7 +101,7 @@ v -enable-globals -o minimax_cli src/
 - Skills：按目录自动发现和切换，默认扫描 `~/.config/minimax/skills` / `~/.agents/skills`，项目级 `.agents/skills` 需要先设置 `--workspace` 或 `MINIMAX_WORKSPACE`；可用 `--auto-skills` 让 AI 自动选择并激活匹配 skill。
 - Custom Commands：基于 TOML 的命令模板。
 - Extensions：安装、启用、更新命令与 MCP 组合包。
-- Experience：把经验记录到本地知识库，再同步回技能。
+- Experience：把经验记录到本地知识库，并自动写回全局 skill 与全局 SOP。
 - Cron：本地定时任务子命令。
 
 ## 默认配置
@@ -117,6 +117,9 @@ max_rounds=5000
 token_limit=80000
 enable_tools=false
 auto_skills=false
+auto_write_skills=true
+auto_upgrade_sops=true
+knowledge_sync_mode=balanced
 enable_desktop_control=false
 enable_screen_capture=false
 enable_logging=false
@@ -163,6 +166,7 @@ debug=false
 - doctor
 - tools, tools on, tools off
 - skills, skills reload, skills create NAME, skills sync NAME|all [mode]
+- sops, sops list, sops show NAME, sops sync NAME|all [mode]
 - skill NAME
 - experience add, list, show, search, prune
 - commands list, commands show NAME, commands reload
@@ -180,6 +184,8 @@ debug=false
 
 - `--enable-tools` 开启时，模型会收到已发现 skills 的元信息，并可通过 `activate_skill` 工具自行加载对应 skill。
 - `--auto-skills` 会显式鼓励模型优先自行选择匹配的 skill；若未设置 `workspace`，会默认使用当前目录以纳入项目级 `.agents/skills`。
+- `experience add` 默认会按 `knowledge_sync_mode` 自动同步到全局 `~/.config/minimax/skills` 和 `~/.config/minimax/sops`；可通过 `auto_write_skills`、`auto_upgrade_sops` 或对应环境变量关闭。
+- AI 开启工具调用后，还可以直接使用 `record_experience` 工具沉淀经验，不必依赖交互命令。
 
 ## 文档索引
 

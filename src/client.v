@@ -21,6 +21,8 @@ Guidelines:
 - When a command fails, try alternative approaches
 - When the task is complete, ALWAYS call task_done with a brief summary of what was accomplished'
 
+const default_experience_capture_instruction = 'When tools are enabled, consider whether the task produced a reusable lesson worth remembering. Before calling task_done, call record_experience if you verified a stable fix, discovered an environment-specific constraint, established a reliable fallback for a failure mode, or completed a repeatable SOP-worthy workflow. Do not record trivial restatements of the request, obvious facts, or unverified guesses. Keep experience records concise and evidence-based, and usually record at most one or two focused lessons per task.'
+
 __global g_phase_status_visible = u64(0)
 __global g_phase_status_generation = u64(0)
 
@@ -350,6 +352,11 @@ fn (mut c ApiClient) build_request_json() string {
 			} else {
 				effective_system = auto_skills_instruction
 			}
+		}
+		if effective_system.len > 0 {
+			effective_system = '${effective_system}\n\n${default_experience_capture_instruction}'
+		} else {
+			effective_system = default_experience_capture_instruction
 		}
 		working_checkpoint := get_working_checkpoint_context()
 		if working_checkpoint.len > 0 {
