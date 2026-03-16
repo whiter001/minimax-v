@@ -41,3 +41,6 @@ token_limit=100000
 # workspace=/path/to/your/project
 # 系统提示词（可选）
 # system_prompt=你是一个专业的编程助手
+auto_write_skills=true
+auto_upgrade_sops=true
+knowledge_sync_mode=balanced

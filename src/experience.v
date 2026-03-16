@@ -231,6 +231,13 @@ fn collect_experience_wizard_record(mut prompter ExperienceWizardPrompter) !Expe
 		tags, confidence, 'wizard')
 }
 
+fn record_experience_automated(skill_name string, title string, scenario string, action string, outcome string, tags string, confidence int) string {
+	mut record := build_experience_record(skill_name, title, scenario, action, outcome,
+		tags, confidence, 'auto') or { return 'Error: ${err.msg()}' }
+	return store_experience_record_with_paths_and_automation(mut record, get_experience_db_path(),
+		get_experience_jsonl_path(), get_experience_markdown_dir(), load_experience_automation_settings())
+}
+
 fn append_experience_automation_results(mut lines []string, record ExperienceRecord, settings ExperienceAutomationSettings, jsonl_path string) {
 	resolved_mode := normalize_experience_sync_mode(settings.sync_mode)
 	if settings.auto_write_skills && settings.skill_root.len > 0 {

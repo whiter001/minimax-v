@@ -1010,7 +1010,7 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 	}
 }
 
-fn (mut c ApiClient) complete_task_done(mut step AgentStep, mut execution AgentExecution, task_done_result string) string {
+fn (mut c ApiClient) complete_task_done(mut step AgentStep, mut execution AgentExecution, task_done_result string, total_retries int) string {
 	step.state = .completed
 	step.end_time = time.now().unix_milli()
 	print_step_status(step)
@@ -1021,6 +1021,27 @@ fn (mut c ApiClient) complete_task_done(mut step AgentStep, mut execution AgentE
 	execution.agent_state = .completed
 	execution.end_time = time.now().unix_milli()
 	c.trajectory.finalize(true, task_done_result)
+
+	// Self-Correction: if there were multiple retries but final success, automate experience recording
+	if total_retries >= 2 && c.enable_tools {
+		skill_name := if skill_registry.active_skill.len > 0 {
+			skill_registry.active_skill
+		} else {
+			'general'
+		}
+		c.logger.log('INFO', 'SELF_CORRECTION', 'Automating experience for task with ${total_retries} retries')
+		exp_msg := record_experience_automated(skill_name, 'Self-Correction: ' + c.trajectory.task,
+			'Task completed after ${total_retries} retries', 'Iterative tool execution and error correction',
+			'Success: ' + utf8_safe_truncate(task_done_result, 200), 'self-correction,retry-success',
+			4)
+		if !c.silent_mode {
+			println('\x1b[36m💡 Self-Correction: 自动记录多次重试后的成功路径...\x1b[0m')
+			if c.debug {
+				println('[DEBUG] ${exp_msg}')
+			}
+		}
+	}
+
 	if term_ui_is_active() {
 		term_ui_add_activity('Agent 完成任务')
 	} else if !c.silent_mode {
@@ -1396,6 +1417,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 	mut failed_tool_batch_streak := 0
 	mut last_failed_bash_command := ''
 	mut failed_bash_command_streak := 0
+	mut total_retries_in_task := 0 // Track total retries for self-correction mechanism
 	mut execution := new_agent_execution(prompt)
 	c.trajectory.start_recording(prompt, c.model)
 
@@ -1502,6 +1524,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			step.tool_results = tool_round_result.tool_results
 			if tool_round_result.round_has_tool_errors {
 				consecutive_tool_failure_rounds++
+				total_retries_in_task++
 			} else {
 				consecutive_tool_failure_rounds = 0
 			}
@@ -1519,7 +1542,8 @@ fn (mut c ApiClient) chat(prompt string) !string {
 
 			// task_done: early exit if agent signaled completion
 			if tool_round_result.task_done_result.len > 0 {
-				return c.complete_task_done(mut step, mut execution, tool_round_result.task_done_result)
+				return c.complete_task_done(mut step, mut execution, tool_round_result.task_done_result,
+					total_retries_in_task)
 			}
 
 			// Reflection: check for tool errors and generate reflection message
