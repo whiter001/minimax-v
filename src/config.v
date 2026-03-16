@@ -28,6 +28,8 @@ pub mut:
 	auto_check_sops        bool
 	auto_write_skills      bool
 	auto_upgrade_sops      bool
+	auto_refine            bool // 自动提示词优化
+	auto_confirm_refine    bool // 是否跳过确认直接执行
 	knowledge_sync_mode    string
 	enable_desktop_control bool
 	enable_screen_capture  bool
@@ -51,6 +53,8 @@ fn default_config() Config {
 		auto_check_sops:        true
 		auto_write_skills:      true
 		auto_upgrade_sops:      true
+		auto_refine:            false
+		auto_confirm_refine:    false
 		knowledge_sync_mode:    'balanced'
 		enable_desktop_control: false
 		enable_screen_capture:  false
@@ -172,6 +176,12 @@ fn parse_config_content(content string, base Config) Config {
 				'auto_upgrade_sops' {
 					config.auto_upgrade_sops = val == 'true' || val == '1'
 				}
+				'auto_refine' {
+					config.auto_refine = val == 'true' || val == '1'
+				}
+				'auto_confirm_refine' {
+					config.auto_confirm_refine = val == 'true' || val == '1'
+				}
 				'knowledge_sync_mode' {
 					trimmed_mode := val.trim_space().to_lower()
 					if trimmed_mode in ['concise', 'balanced', 'strict'] {
@@ -270,6 +280,12 @@ fn apply_env_overrides(mut config Config) {
 	if val := os.getenv_opt('MINIMAX_AUTO_UPGRADE_SOPS') {
 		apply_env_override(mut config, 'MINIMAX_AUTO_UPGRADE_SOPS', val)
 	}
+	if val := os.getenv_opt('MINIMAX_AUTO_REFINE') {
+		apply_env_override(mut config, 'MINIMAX_AUTO_REFINE', val)
+	}
+	if val := os.getenv_opt('MINIMAX_AUTO_CONFIRM_REFINE') {
+		apply_env_override(mut config, 'MINIMAX_AUTO_CONFIRM_REFINE', val)
+	}
 	if val := os.getenv_opt('MINIMAX_KNOWLEDGE_SYNC_MODE') {
 		apply_env_override(mut config, 'MINIMAX_KNOWLEDGE_SYNC_MODE', val)
 	}
@@ -323,6 +339,12 @@ fn apply_env_override(mut config Config, key string, value string) {
 		}
 		'MINIMAX_AUTO_UPGRADE_SOPS' {
 			config.auto_upgrade_sops = value == 'true' || value == '1'
+		}
+		'MINIMAX_AUTO_REFINE' {
+			config.auto_refine = value == 'true' || value == '1'
+		}
+		'MINIMAX_AUTO_CONFIRM_REFINE' {
+			config.auto_confirm_refine = value == 'true' || value == '1'
 		}
 		'MINIMAX_KNOWLEDGE_SYNC_MODE' {
 			trimmed_mode := value.trim_space().to_lower()

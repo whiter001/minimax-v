@@ -27,6 +27,20 @@ fn sigint_handler(_ os.Signal) {
 	exit(130)
 }
 
+// confirm_refined_prompt displays a refined prompt and asks the user for confirmation
+fn confirm_refined_prompt(refined string) bool {
+	println('\x1b[1;33m✨ 优化后的提示词:\x1b[0m\n${refined}\n')
+	print('\x1b[1m是否使用优化后的提示词? [Y/n]: \x1b[0m')
+	os.flush()
+	answer := os.get_line().trim_space().to_lower()
+	if answer == '' || answer == 'y' || answer == 'yes' {
+		println('\x1b[32m已采用优化后的提示词。\x1b[0m\n')
+		return true
+	}
+	println('\x1b[33m已跳过优化，使用原始提示词。\x1b[0m\n')
+	return false
+}
+
 // Expand @file references in user input
 // Supports: @path/to/file — reads file content and appends it to the prompt
 fn expand_file_references(input string, workspace string) string {
@@ -377,7 +391,18 @@ fn headless_mode(mut client ApiClient, prompt string, output_format string) int 
 	}
 
 	// Expand @file references in headless mode too
-	final_prompt := expand_file_references(prompt, client.workspace)
+	mut final_prompt := expand_file_references(prompt, client.workspace)
+
+	if client.auto_refine {
+		refined := client.refine_prompt(final_prompt) or { final_prompt }
+		if refined != final_prompt {
+			if client.auto_confirm_refine {
+				final_prompt = refined
+			} else if confirm_refined_prompt(refined) {
+				final_prompt = refined
+			}
+		}
+	}
 
 	response := client.chat(final_prompt) or {
 		print_headless_error(output_format, err.str(), 1)

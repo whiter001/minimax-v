@@ -414,7 +414,18 @@ fn handle_interactive_general_input(mut client ApiClient, trimmed string) {
 			println(shell_result)
 		}
 	} else {
-		final_input := expand_file_references(trimmed, client.workspace)
+		mut final_input := expand_file_references(trimmed, client.workspace)
+		if client.auto_refine {
+			refined := client.refine_prompt(final_input) or { final_input }
+			if refined != final_input {
+				if client.auto_confirm_refine {
+					final_input = refined
+				} else if confirm_refined_prompt(refined) {
+					final_input = refined
+				}
+			}
+		}
+
 		response := client.chat(final_input) or {
 			println('\x1b[31m❌ 错误: ${err}\x1b[0m')
 			client.logger.log_error('CHAT', err.str())

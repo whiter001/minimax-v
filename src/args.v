@@ -59,6 +59,16 @@ fn apply_cli_boolean_flag(mut client ApiClient, arg string) bool {
 			client.plan_mode = true
 			client.enable_tools = true
 		}
+		'--auto-refine' {
+			client.auto_refine = true
+		}
+		'--refine' {
+			client.auto_refine = true
+		}
+		'--auto-confirm-refine' {
+			client.auto_refine = true
+			client.auto_confirm_refine = true
+		}
 		else {
 			return false
 		}
@@ -181,6 +191,8 @@ fn build_help_text() string {
 		'  --trajectory                   启用执行轨迹记录 (~/.config/minimax/trajectories/)',
 		'  --output-format <text|json|plain>  输出格式 (headless模式)',
 		'  --plan                         Plan模式（AI先制定计划，确认后执行）',
+		'  --refine / --auto-refine       启用提示词自动优化（执行前先由AI完善Prompt）',
+		'  --auto-confirm-refine          启用自动优化并跳过确认（静默模式）',
 		'  --debug                        显示调试日志',
 		'',
 		'\x1b[1m交互模式命令:\x1b[0m',
@@ -250,6 +262,8 @@ fn build_help_text() string {
 		'  auto_check_sops=true',
 		'  auto_write_skills=true',
 		'  auto_upgrade_sops=true',
+		'  auto_refine=false              任务开始前自动优化提示词',
+		'  auto_confirm_refine=false      优化后不经确认自动执行',
 		'  knowledge_sync_mode=balanced',
 		'  enable_desktop_control=false',
 		'  enable_screen_capture=false',
@@ -274,6 +288,8 @@ fn print_help() {
 	println('  MINIMAX_AUTO_CHECK_SOPS        任务开始前自动检查匹配的 SOP (true/1)')
 	println('  MINIMAX_AUTO_WRITE_SKILLS      experience add 后自动写入全局 skills (true/1)')
 	println('  MINIMAX_AUTO_UPGRADE_SOPS      experience add 后自动升级全局 SOP (true/1)')
+	println('  MINIMAX_AUTO_REFINE            任务开始前自动优化提示词 (true/1)')
+	println('  MINIMAX_AUTO_CONFIRM_REFINE    优化后不经确认自动执行 (true/1)')
 	println('  MINIMAX_KNOWLEDGE_SYNC_MODE    经验同步模式 concise|balanced|strict')
 	println('  MINIMAX_ENABLE_DESKTOP_CONTROL 启用鼠标/键盘控制 (true/1)')
 	println('  MINIMAX_ENABLE_SCREEN_CAPTURE  启用屏幕截图 (true/1)')

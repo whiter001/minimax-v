@@ -23,6 +23,16 @@ Guidelines:
 
 const default_experience_capture_instruction = 'When tools are enabled, consider whether the task produced a reusable lesson worth remembering. Before calling task_done, call record_experience if you verified a stable fix, discovered an environment-specific constraint, established a reliable fallback for a failure mode, or completed a repeatable SOP-worthy workflow. Do not record trivial restatements of the request, obvious facts, or unverified guesses. Keep experience records concise and evidence-based, and usually record at most one or two focused lessons per task.'
 
+const refine_system_prompt = "You are a prompt engineering expert. Your task is to refine the user's input prompt to make it more clear, structured, and effective for an AI assistant.
+Guidelines:
+1. Maintain the original intent of the user.
+2. Add necessary context if it can be inferred.
+3. Structure the prompt into sections if appropriate (Goal, Context, Constraints, Output Format).
+4. If the user mentions files, remind the assistant to read them first.
+5. If the task is complex, suggest a step-by-step approach.
+6. Keep the refined prompt concise but comprehensive.
+7. Return ONLY the refined prompt text, no explanations."
+
 __global g_phase_status_visible = u64(0)
 __global g_phase_status_generation = u64(0)
 
@@ -246,6 +256,8 @@ pub mut:
 	enable_tools           bool
 	auto_skills            bool
 	auto_check_sops        bool
+	auto_refine            bool
+	auto_confirm_refine    bool
 	enable_desktop_control bool
 	enable_screen_capture  bool
 	debug                  bool
@@ -275,6 +287,8 @@ fn new_api_client(config Config) ApiClient {
 		enable_tools:           config.enable_tools
 		auto_skills:            config.auto_skills
 		auto_check_sops:        config.auto_check_sops
+		auto_refine:            config.auto_refine
+		auto_confirm_refine:    config.auto_confirm_refine
 		enable_desktop_control: config.enable_desktop_control
 		enable_screen_capture:  config.enable_screen_capture
 		debug:                  config.debug
@@ -293,7 +307,70 @@ fn (mut c ApiClient) add_message(role string, content string) {
 	}
 }
 
+// refine_prompt uses AI to improve the user's input prompt
+pub fn (mut c ApiClient) refine_prompt(prompt string) !string {
+	if !c.silent_mode {
+		c.print_phase_status('正在优化提示词...', '')
+	}
+	c.logger.log_phase_start('prompt.refine', 'original_len=${prompt.len}')
+
+	// Temporary client for refinement to avoid polluting message history
+	mut refine_client := ApiClient{
+		api_key:                c.api_key
+		api_url:                c.api_url
+		model:                  c.model
+		temperature:            0.3 // Low temperature for consistency
+		max_tokens:             2000
+		system_prompt:          refine_system_prompt
+		logger:                 c.logger
+		silent_mode:            true
+		enable_desktop_control: false
+		enable_screen_capture:  false
+		enable_tools:           false
+	}
+
+	body_json := refine_client.build_request_json_internal([
+		ChatMessage{
+			role:    'user'
+			content: prompt
+		},
+	])
+
+	response_body := refine_client.send_api_request(body_json) or {
+		c.logger.log_error('REFINE', 'failed to send api request: ${err}')
+		if !c.silent_mode {
+			println('\x1b[33m⚠️  提示词优化失败，将使用原始提示词。\x1b[0m')
+		}
+		return prompt
+	}
+
+	refined := refine_client.parse_text_response(response_body).trim_space()
+	if refined.len == 0 {
+		c.logger.log_error('REFINE', 'received empty refined prompt')
+		if !c.silent_mode {
+			println('\x1b[33m⚠️  优化结果为空，将使用原始提示词。\x1b[0m')
+		}
+		return prompt
+	}
+
+	// Safety check: if refined prompt is too long, fallback to original
+	if refined.len > 15000 {
+		c.logger.log_error('REFINE', 'refined prompt too long (${refined.len} chars), falling back to original')
+		if !c.silent_mode {
+			println('\x1b[33m⚠️  优化结果过长 (${refined.len} 字符)，将使用原始提示词。\x1b[0m')
+		}
+		return prompt
+	}
+
+	c.logger.log_phase_end('prompt.refine', 0, 'refined_len=${refined.len}')
+	return refined
+}
+
 fn (mut c ApiClient) build_request_json() string {
+	return c.build_request_json_internal(c.messages)
+}
+
+fn (mut c ApiClient) build_request_json_internal(messages []ChatMessage) string {
 	mut body_json := '{"model":"${c.model}","max_tokens":${c.max_tokens},"temperature":${c.temperature}'
 
 	if c.use_streaming {
@@ -399,12 +476,18 @@ fn (mut c ApiClient) build_request_json() string {
 	// Add cache_control so the static system prompt is cached as a prefix anchor.
 	if effective_system.len > 0 {
 		escaped_sys := escape_json_string(effective_system)
-		body_json += ',"system":[{"type":"text","text":"${escaped_sys}","cache_control":{"type":"ephemeral"}}]'
+		// For standard messages, we enable caching; for sub-calls (like refine), we skip it to avoid polluting cache stats
+		// Also refine_prompt usually is 1 message (user).
+		if messages.len > 1 {
+			body_json += ',"system":[{"type":"text","text":"${escaped_sys}","cache_control":{"type":"ephemeral"}}]'
+		} else {
+			body_json += ',"system":[{"type":"text","text":"${escaped_sys}"}]'
+		}
 	}
 
 	body_json += ',"messages":['
 
-	for i, msg in c.messages {
+	for i, msg in messages {
 		mut content_val := ''
 		if msg.content_json.len > 0 {
 			content_val = msg.content_json
@@ -414,7 +497,7 @@ fn (mut c ApiClient) build_request_json() string {
 		}
 		// Add cache_control on the second-to-last assistant message to cache conversation
 		// history prefix (leave the very last user turn outside the cache so it can vary).
-		is_cache_anchor := c.messages.len >= 4 && i == c.messages.len - 2 && msg.role == 'assistant'
+		is_cache_anchor := messages.len >= 4 && i == messages.len - 2 && msg.role == 'assistant'
 		if is_cache_anchor {
 			// Wrap plain string content into a content block with cache_control
 			if !content_val.starts_with('[') {

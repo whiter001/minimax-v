@@ -41,6 +41,13 @@ token_limit=100000
 # workspace=/path/to/your/project
 # 系统提示词（可选）
 # system_prompt=你是一个专业的编程助手
+
+# === 提示词优化 (Refine) ===
+# 开启提示词自动优化（执行前先由AI完善Prompt）
+# auto_refine=false
+# 启用自动优化并跳过确认（静默模式）
+# auto_confirm_refine=false
+
 auto_write_skills=true
 auto_upgrade_sops=true
 knowledge_sync_mode=balanced
