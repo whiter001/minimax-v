@@ -250,7 +250,7 @@ fn test_complete_task_done_updates_execution_and_messages() {
 		start_time:  1
 	}
 	mut execution := new_agent_execution('task')
-	result := client.complete_task_done(mut step, mut execution, 'done summary')
+	result := client.complete_task_done(mut step, mut execution, 'done summary', 0)
 	assert result == 'done summary'
 	assert step.state == .completed
 	assert execution.success
