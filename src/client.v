@@ -453,6 +453,19 @@ fn (mut c ApiClient) build_request_json_internal(messages []ChatMessage) string 
 		} else {
 			effective_system = default_experience_capture_instruction
 		}
+
+		// Inject session notes (persistent memory across sessions)
+		session_notes := session_note_read()
+		if session_notes.len > 0 && session_notes != '(No session notes yet)'
+			&& session_notes != '(Session notes file is empty)' {
+			session_note_prompt := 'Below are notes from previous sessions related to this project:\n\n${session_notes}\n\nUse these notes to align with project state, decisions, and temporary constraints.'
+			if effective_system.len > 0 {
+				effective_system = '${effective_system}\n\n${session_note_prompt}'
+			} else {
+				effective_system = session_note_prompt
+			}
+		}
+
 		working_checkpoint := get_working_checkpoint_context()
 		if working_checkpoint.len > 0 {
 			if effective_system.len > 0 {
