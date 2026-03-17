@@ -21,6 +21,16 @@ fn set_tool_capabilities(enable_desktop_control bool, enable_screen_capture bool
 	allow_screen_capture = enable_screen_capture
 }
 
+// --- Windows Reserved Name Check ---
+
+fn is_windows_reserved_name(path string) bool {
+	// Reference: https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
+	base := os.file_name(path).to_upper().split('.')[0]
+	reserved := ['CON', 'PRN', 'AUX', 'NUL', 'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7',
+		'COM8', 'COM9', 'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9']
+	return base in reserved
+}
+
 // --- Persistent Bash Session ---
 // Maintains working directory and environment state across tool calls
 
@@ -172,6 +182,14 @@ fn (mut s BashSession) execute(command string) string {
 		if command.contains(d) {
 			return 'Error: ⚠️  拒绝执行危险命令'
 		}
+	}
+
+	// Windows reserved name check for redirects (e.g. > nul, > con)
+	u_cmd := command.to_upper()
+	if u_cmd.contains('> NUL') || u_cmd.contains('> CON') || u_cmd.contains('> PRN')
+		|| u_cmd.contains('> AUX') || u_cmd.contains('>> NUL') || u_cmd.contains('>> CON')
+		|| u_cmd.contains('>> PRN') || u_cmd.contains('>> AUX') {
+		return 'Error: ⚠️ 禁止重定向到 Windows 保留设备 (NUL, CON, PRN, AUX)'
 	}
 
 	if should_use_windows_direct_command(command) {
@@ -764,6 +782,9 @@ fn read_file_tool(path string) !string {
 fn write_file_tool(path string, content string) !string {
 	if path.len == 0 {
 		return error('文件路径不能为空')
+	}
+	if is_windows_reserved_name(path) {
+		return error('⚠️ 禁止写入 Windows 保留设备名 (如 CON, PRN, AUX, NUL, COM1-9, LPT1-9): ${path}')
 	}
 	os.write_file(path, content)!
 	return '✅ 文件已写入: ${path} (${content.len} 字符)'
