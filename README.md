@@ -111,7 +111,7 @@ v -enable-globals -o minimax_cli src/
 
 ```ini
 api_url=https://api.minimaxi.com/anthropic/v1/messages
-model=MiniMax-M2.5
+model=MiniMax-M2.7
 temperature=0.7
 max_tokens=102400
 max_rounds=5000
@@ -138,7 +138,7 @@ debug=false
 ### CLI 参数
 
 - --model NAME
-- --temperature 0.0-2.0
+- --temperature (0.0, 1.0]
 - --max-tokens N
 - --max-rounds N
 - --token-limit N

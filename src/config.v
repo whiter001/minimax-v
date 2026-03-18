@@ -3,7 +3,7 @@ module main
 import os
 import strconv
 
-const max_response_tokens = 1000000
+const max_response_tokens = 204800 // 输入+输出总 token 限制 (MiniMax API)
 
 fn is_valid_max_rounds(rounds int) bool {
 	return rounds > 0 && rounds <= max_tool_call_rounds
@@ -42,7 +42,7 @@ fn default_config() Config {
 	return Config{
 		api_key:                ''
 		api_url:                'https://api.minimaxi.com/anthropic/v1/messages'
-		model:                  'MiniMax-M2.5'
+		model:                  'MiniMax-M2.7'
 		temperature:            0.7
 		max_tokens:             102400
 		max_rounds:             5000
@@ -143,7 +143,7 @@ fn parse_config_content(content string, base Config) Config {
 				}
 				'temperature' {
 					if temp := strconv.atof64(val) {
-						if temp >= 0.0 && temp <= 2.0 {
+						if temp > 0.0 && temp <= 1.0 {
 							config.temperature = temp
 						}
 					}
@@ -310,7 +310,7 @@ fn apply_env_override(mut config Config, key string, value string) {
 		}
 		'MINIMAX_TEMPERATURE' {
 			if parsed := strconv.atof64(value) {
-				if parsed >= 0.0 && parsed <= 2.0 {
+				if parsed > 0.0 && parsed <= 1.0 {
 					config.temperature = parsed
 				}
 			}

@@ -73,7 +73,7 @@ pub fn (mut manager SessionManager) create_session(name string) !Session {
 	mut session := Session{
 		id:          id
 		name:        name
-		model:       'MiniMax-M2.5'
+		model:       'MiniMax-M2.7'
 		temperature: 0.7
 		messages:    []
 		context:     map[string]string{}

@@ -175,10 +175,10 @@ fn main() {
 				if k + 1 < args.len {
 					k++
 					if temp := strconv.atof64(args[k]) {
-						if temp >= 0.0 && temp <= 2.0 {
+						if temp > 0.0 && temp <= 1.0 {
 							client.temperature = temp
 						} else {
-							println('⚠️  temperature 应在 0.0-2.0 之间，已忽略')
+							println('⚠️  temperature 应在 (0.0, 1.0] 之间，已忽略')
 						}
 					}
 				}

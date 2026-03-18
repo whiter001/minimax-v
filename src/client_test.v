@@ -64,7 +64,7 @@ fn test_build_request_json_basic() {
 	mut client := new_api_client(config)
 	client.add_message('user', 'hello')
 	json := client.build_request_json()
-	assert json.contains('"model":"MiniMax-M2.5"')
+	assert json.contains('"model":"MiniMax-M2.7"')
 	assert json.contains('"max_tokens":102400')
 	assert json.contains('"role":"user"')
 	assert json.contains('"content":"hello"')

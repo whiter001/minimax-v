@@ -5,10 +5,10 @@ import os
 // ===== parse_config_content =====
 
 fn test_parse_config_basic() {
-	content := 'api_key=sk-test-123\nmodel=MiniMax-M2.5\ntemperature=0.5'
+	content := 'api_key=sk-test-123\nmodel=MiniMax-M2.7\ntemperature=0.5'
 	config := parse_config_content(content, default_config())
 	assert config.api_key == 'sk-test-123'
-	assert config.model == 'MiniMax-M2.5'
+	assert config.model == 'MiniMax-M2.7'
 	assert config.temperature == 0.5
 }
 
@@ -74,13 +74,13 @@ fn test_parse_config_max_tokens() {
 }
 
 fn test_parse_config_max_tokens_upper_bound() {
-	content := 'max_tokens=1000000'
+	content := 'max_tokens=204800'
 	config := parse_config_content(content, default_config())
-	assert config.max_tokens == 1000000
+	assert config.max_tokens == 204800
 }
 
 fn test_parse_config_max_tokens_out_of_range() {
-	content := 'max_tokens=1000001'
+	content := 'max_tokens=204801'
 	config := parse_config_content(content, default_config())
 	// Out of range — should keep default
 	assert config.max_tokens == 102400
@@ -147,15 +147,15 @@ fn test_parse_config_unknown_keys_ignored() {
 }
 
 fn test_parse_config_temperature_boundaries() {
-	// Valid: 0.0
+	// Valid: 1.0 (recommended)
+	config1 := parse_config_content('temperature=1.0', default_config())
+	assert config1.temperature == 1.0
+
+	// Invalid: 0.0 — outside range (0.0, 1.0]
 	config0 := parse_config_content('temperature=0.0', default_config())
-	assert config0.temperature == 0.0
+	assert config0.temperature == 0.7 // keeps default
 
-	// Valid: 2.0
-	config2 := parse_config_content('temperature=2.0', default_config())
-	assert config2.temperature == 2.0
-
-	// Invalid: 3.0 — keep default
+	// Invalid: 3.0 — outside range, keeps default
 	config3 := parse_config_content('temperature=3.0', default_config())
 	assert config3.temperature == 0.7
 }
@@ -166,7 +166,7 @@ fn test_default_config() {
 	config := default_config()
 	assert config.api_key == ''
 	assert config.api_url == 'https://api.minimaxi.com/anthropic/v1/messages'
-	assert config.model == 'MiniMax-M2.5'
+	assert config.model == 'MiniMax-M2.7'
 	assert config.temperature == 0.7
 	assert config.max_tokens == 102400
 	assert config.max_rounds == 5000
@@ -204,7 +204,7 @@ fn test_get_minimax_config_dir_uses_minimax_config_home_override() {
 
 fn test_apply_env_override_supports_advanced_fields() {
 	mut config := default_config()
-	apply_env_override(mut config, 'MINIMAX_MAX_TOKENS', '1000000')
+	apply_env_override(mut config, 'MINIMAX_MAX_TOKENS', '204800')
 	apply_env_override(mut config, 'MINIMAX_ENABLE_LOGGING', 'true')
 	apply_env_override(mut config, 'MINIMAX_DEBUG', '1')
 	apply_env_override(mut config, 'MINIMAX_MAX_ROUNDS', '150')
@@ -216,7 +216,7 @@ fn test_apply_env_override_supports_advanced_fields() {
 	apply_env_override(mut config, 'MINIMAX_AUTO_UPGRADE_SOPS', '0')
 	apply_env_override(mut config, 'MINIMAX_KNOWLEDGE_SYNC_MODE', 'strict')
 	apply_env_override(mut config, 'MINIMAX_WORKSPACE', '/tmp/ws')
-	assert config.max_tokens == 1000000
+	assert config.max_tokens == 204800
 	assert config.enable_logging
 	assert config.debug
 	assert config.max_rounds == 150

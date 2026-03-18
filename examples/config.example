@@ -9,7 +9,7 @@ api_key=sk-cp-your-api-key-here
 api_url=https://api.minimaxi.com/anthropic/v1/messages
 
 # === 模型参数 ===
-model=MiniMax-M2.5
+model=MiniMax-M2.7
 temperature=0.7
 # 单次回答最多生成多少 token。单位是 token，不是字符数。
 # 对 MiniMax M2.5，日常编码场景推荐 32768，兼顾长输出与上下文余量。
