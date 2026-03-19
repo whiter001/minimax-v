@@ -103,6 +103,22 @@ fn test_build_request_json_with_tools() {
 	assert json.contains('call record_experience if you verified a stable fix')
 }
 
+fn test_build_request_json_with_lazy_builtin_mcp_tools() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	mut client := new_api_client(config)
+	client.mcp_manager = new_mcp_manager()
+	client.mcp_manager.add_lazy_server('MiniMax', 'uvx', ['--native-tls', 'minimax-coding-plan-mcp',
+		'-y'], {
+		'MINIMAX_API_KEY': 'placeholder'
+	}, builtin_mcp_tools())
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('"name":"web_search"')
+	assert json.contains('"name":"understand_image"')
+}
+
 fn test_build_request_json_with_workspace() {
 	mut config := default_config()
 	config.api_key = 'test-key'

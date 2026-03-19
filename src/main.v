@@ -428,14 +428,15 @@ fn init_mcp(mut client ApiClient) {
 	client.mcp_manager = new_mcp_manager()
 	g_mcp_manager = &client.mcp_manager
 
-	// Built-in: MiniMax Coding Plan MCP (web_search + understand_image)
+	// Built-in: MiniMax Coding Plan MCP is registered lazily so the process
+	// only starts when one of its tools is actually needed.
 	minimax_mcp_env := {
 		'MINIMAX_API_KEY':  client.api_key
 		'MINIMAX_API_HOST': 'https://api.minimaxi.com'
 	}
-	client.mcp_manager.add_server('MiniMax', 'uvx', ['--native-tls', 'minimax-coding-plan-mcp',
-		'-y'], minimax_mcp_env)
-	println('[MCP] 已添加内置 MiniMax MCP (web_search, understand_image)')
+	client.mcp_manager.add_lazy_server('MiniMax', 'uvx', ['--native-tls', 'minimax-coding-plan-mcp',
+		'-y'], minimax_mcp_env, builtin_mcp_tools())
+	println('[MCP] 已注册内置 MiniMax MCP (web_search, understand_image，按需启动)')
 
 	// Load additional servers from config file
 	mcp_configs := load_mcp_config()
@@ -452,19 +453,29 @@ fn init_mcp(mut client ApiClient) {
 		println('[MCP] 从扩展加载了 ${ext_mcp_count} 个 MCP 服务')
 	}
 
-	client.mcp_manager.start_all()
+	client.mcp_manager.start_eager_servers()
 	client.enable_tools = true
 
 	// Check if any server connected successfully
 	mut connected := false
+	mut has_lazy_builtin := false
 	for server in client.mcp_manager.servers {
 		if server.is_connected {
 			connected = true
 			break
 		}
+		if server.lazy_start && server.preset_tools.len > 0 {
+			has_lazy_builtin = true
+		}
 	}
 
-	if !connected {
+	if connected {
+		return
+	}
+
+	if has_lazy_builtin {
+		println('[MCP] ⏳ 内置 MiniMax MCP 已就绪，将在首次调用 web_search / understand_image 时启动')
+	} else {
 		println('[MCP] ⚠️  注意: MCP服务初始化失败，将使用本地工具')
 		println('[MCP] 💡 对于网页分析，建议使用: curl/PowerShell下载 + read_file工具分析')
 	}
@@ -480,10 +491,20 @@ fn print_mcp_status(client ApiClient) {
 	}
 
 	for server in client.mcp_manager.servers {
-		status := if server.is_connected { '✅ 已连接' } else { '❌ 断开' }
+		status := if server.is_connected {
+			'✅ 已连接'
+		} else if server.lazy_start {
+			'⏳ 待启动'
+		} else {
+			'❌ 断开'
+		}
 		println('  ${server.name}: ${status}')
 		if server.is_connected {
 			for tool in server.tools {
+				println('    • ${tool.name} - ${tool.description}')
+			}
+		} else if server.preset_tools.len > 0 {
+			for tool in server.preset_tools {
 				println('    • ${tool.name} - ${tool.description}')
 			}
 		}

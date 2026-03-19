@@ -85,7 +85,7 @@ v -enable-globals -o minimax_cli src/
 
 使用 --mcp 时：
 
-- 自动启用内置 MiniMax MCP 能力。
+- 自动注册内置 MiniMax MCP 能力，web_search / understand_image 会在首次使用时按需启动。
 - 从 ~/.config/minimax/mcp.json 加载额外 MCP 服务。
 - 可接入 Playwright 一类的外部工具服务器。
 

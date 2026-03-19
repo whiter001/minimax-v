@@ -71,9 +71,9 @@
 
 负责 MCP JSON-RPC over stdio：
 
-- 启停 MCP 子进程。
+- 注册与启停 MCP 子进程。
 - 初始化握手。
-- 工具发现。
+- 工具发现，以及内置 MCP 的静态预置工具暴露。
 - 统一纳入调用面。
 
 ### [src/skills.v](../src/skills.v)

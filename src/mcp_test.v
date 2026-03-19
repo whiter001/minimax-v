@@ -32,6 +32,34 @@ fn test_mcp_timeout_poll_attempts_rounds_up_small_timeouts() {
 	assert mcp_timeout_poll_attempts(250) == 3
 }
 
+fn test_builtin_mcp_tools_are_static() {
+	tools := builtin_mcp_tools()
+	assert tools.len == 2
+	assert tools[0].name == 'web_search'
+	assert tools[1].name == 'understand_image'
+}
+
+fn test_lazy_mcp_server_exposes_preset_tools_before_start() {
+	mut manager := new_mcp_manager()
+	manager.add_lazy_server('MiniMax', 'uvx', ['--native-tls', 'minimax-coding-plan-mcp', '-y'],
+		{
+		'MINIMAX_API_KEY': 'placeholder'
+	}, builtin_mcp_tools())
+	tools := manager.get_all_tools()
+	assert tools.len == 2
+	assert tools[0].name == 'web_search'
+	assert tools[1].name == 'understand_image'
+}
+
+fn test_builtin_understand_image_schema_includes_aliases() {
+	tool := builtin_understand_image_tool()
+	assert tool.raw_schema.contains('"image_path"')
+	assert tool.raw_schema.contains('"path"')
+	assert tool.raw_schema.contains('"file"')
+	assert tool.raw_schema.contains('"prompt"')
+	assert tool.raw_schema.contains('"question"')
+}
+
 fn test_build_mcp_process_enables_process_group() {
 	server := McpServer{
 		command: 'uvx'

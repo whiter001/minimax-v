@@ -34,6 +34,8 @@ pub mut:
 	process      &os.Process = unsafe { nil }
 	request_id   int
 	tools        []McpTool
+	preset_tools []McpTool
+	lazy_start   bool
 	is_connected bool
 }
 
@@ -48,6 +50,47 @@ fn new_mcp_manager() McpManager {
 	}
 }
 
+fn new_mcp_tool_param(name string, description string, param_type string, required bool) McpToolParam {
+	return McpToolParam{
+		name:        name
+		description: description
+		param_type:  param_type
+		required:    required
+	}
+}
+
+fn new_mcp_tool(name string, description string, params []McpToolParam, raw_schema string) McpTool {
+	return McpTool{
+		name:        name
+		description: description
+		params:      params
+		raw_schema:  raw_schema
+	}
+}
+
+fn builtin_web_search_tool() McpTool {
+	return new_mcp_tool('web_search', 'Search the web and return relevant results.', [
+		new_mcp_tool_param('query', 'Search query string.', 'string', true),
+		new_mcp_tool_param('q', 'Alias of query.', 'string', false),
+		new_mcp_tool_param('prompt', 'Optional natural-language prompt.', 'string', false),
+	], '{"type":"object","properties":{"query":{"type":"string","description":"Search query string."},"q":{"type":"string","description":"Alias of query."},"prompt":{"type":"string","description":"Optional natural-language prompt."}},"required":["query"]}')
+}
+
+fn builtin_understand_image_tool() McpTool {
+	return new_mcp_tool('understand_image', 'Analyze an image file and answer questions about it.',
+		[
+		new_mcp_tool_param('image_path', 'Path to the image file.', 'string', true),
+		new_mcp_tool_param('path', 'Alias of image_path.', 'string', false),
+		new_mcp_tool_param('file', 'Alias of image_path.', 'string', false),
+		new_mcp_tool_param('prompt', 'Analysis instruction or question.', 'string', false),
+		new_mcp_tool_param('question', 'Alias of prompt.', 'string', false),
+	], '{"type":"object","properties":{"image_path":{"type":"string","description":"Path to the image file."},"path":{"type":"string","description":"Alias of image_path."},"file":{"type":"string","description":"Alias of image_path."},"prompt":{"type":"string","description":"Analysis instruction or question."},"question":{"type":"string","description":"Alias of prompt."}},"required":["image_path"]}')
+}
+
+fn builtin_mcp_tools() []McpTool {
+	return [builtin_web_search_tool(), builtin_understand_image_tool()]
+}
+
 fn (mut m McpManager) add_server(name string, command string, args []string, env map[string]string) {
 	mut server := &McpServer{
 		name:         name
@@ -56,6 +99,23 @@ fn (mut m McpManager) add_server(name string, command string, args []string, env
 		env:          env
 		request_id:   0
 		tools:        []McpTool{}
+		preset_tools: []McpTool{}
+		lazy_start:   false
+		is_connected: false
+	}
+	m.servers << server
+}
+
+fn (mut m McpManager) add_lazy_server(name string, command string, args []string, env map[string]string, preset_tools []McpTool) {
+	mut server := &McpServer{
+		name:         name
+		command:      command
+		args:         args
+		env:          env
+		request_id:   0
+		tools:        []McpTool{}
+		preset_tools: preset_tools
+		lazy_start:   true
 		is_connected: false
 	}
 	m.servers << server
@@ -63,6 +123,18 @@ fn (mut m McpManager) add_server(name string, command string, args []string, env
 
 fn (mut m McpManager) start_all() {
 	for mut server in m.servers {
+		if server.is_connected {
+			continue
+		}
+		start_mcp_server(mut server)
+	}
+}
+
+fn (mut m McpManager) start_eager_servers() {
+	for mut server in m.servers {
+		if server.is_connected || server.lazy_start {
+			continue
+		}
 		start_mcp_server(mut server)
 	}
 }
@@ -78,20 +150,77 @@ fn (mut m McpManager) get_all_tools() []McpTool {
 	for server in m.servers {
 		if server.is_connected {
 			all << server.tools
+		} else if server.preset_tools.len > 0 {
+			all << server.preset_tools
 		}
 	}
 	return all
 }
 
-fn (mut m McpManager) call_tool(tool_name string, arguments string) !string {
-	for mut server in m.servers {
+fn server_has_tool(server McpServer, tool_name string, include_preset bool) bool {
+	for tool in server.tools {
+		if tool.name == tool_name {
+			return true
+		}
+	}
+	if include_preset {
+		for tool in server.preset_tools {
+			if tool.name == tool_name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+fn start_lazy_mcp_server_for_tool(mut server McpServer, tool_name string) bool {
+	start_mcp_server(mut server)
+	if server.is_connected && server_has_tool(server, tool_name, false) {
+		return true
+	}
+	println('[MCP] ❌ 懒启动失败: ${server.name} 无法提供 ${tool_name}')
+	return false
+}
+
+fn (mut m McpManager) find_connected_server_for_tool(tool_name string) ?&McpServer {
+	for server in m.servers {
 		if !server.is_connected {
 			continue
 		}
-		for tool in server.tools {
-			if tool.name == tool_name {
-				return mcp_call_tool(mut server, tool_name, arguments)
-			}
+		if server_has_tool(server, tool_name, false) {
+			return server
+		}
+	}
+	return none
+}
+
+fn (mut m McpManager) try_start_lazy_server_for_tool(tool_name string) bool {
+	mut started := false
+	for mut server in m.servers {
+		if !server.lazy_start || !server_has_tool(server, tool_name, true) {
+			continue
+		}
+		started = start_lazy_mcp_server_for_tool(mut server, tool_name)
+		if started {
+			return true
+		}
+	}
+	return false
+}
+
+fn (mut m McpManager) call_tool(tool_name string, arguments string) !string {
+	if mut server := m.find_connected_server_for_tool(tool_name) {
+		return mcp_call_tool(mut server, tool_name, arguments)
+	}
+
+	if m.try_start_lazy_server_for_tool(tool_name) {
+		if mut server := m.find_connected_server_for_tool(tool_name) {
+			return mcp_call_tool(mut server, tool_name, arguments)
+		}
+	}
+	for server in m.servers {
+		if server.lazy_start && server_has_tool(server, tool_name, true) {
+			return error('MCP tool "${tool_name}" was registered by ${server.name}, but it could not be started')
 		}
 	}
 	return error('MCP tool "${tool_name}" not found')
