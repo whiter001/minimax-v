@@ -102,7 +102,7 @@
 
 如果交互命令中的 commands 或 extensions 有异常，优先从这个文件排查。
 
-### [src/experience.v](../src/experience.v)
+### [src/experience.v](../src/experience.v) 经验沉淀与同步
 
 负责经验沉淀：
 
