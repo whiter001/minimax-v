@@ -181,7 +181,7 @@ fn build_help_text() string {
 		'  --enable-tools                 启用AI工具调用（AI可主动读写文件/执行命令）',
 		'  --enable-desktop-control       启用鼠标/键盘控制工具（高权限）',
 		'  --enable-screen-capture        启用屏幕截图工具',
-		'  --mcp                          启用MCP服务（加载 ~/.config/minimax/mcp.json 配置）',
+		'  --mcp                          加载 ~/.config/minimax/mcp.json 中的额外 MCP 服务',
 		'  --acp                          启动 ACP stdio server 模式（MVP）',
 		'  --term-ui                      使用 term.ui 终端界面（交互模式）',
 		'  --max-rounds <1-${max_tool_call_rounds}>          最大工具调用轮数 (default: 5000)',
@@ -309,7 +309,7 @@ fn print_help() {
 	println('  ./minimax_cli --log -p "调试这个Bug" --enable-tools')
 	println('')
 	println('\x1b[1mMCP 服务:\x1b[0m')
-	println('  内置: MiniMax MCP (web_search, understand_image)，--mcp 注册后按需启动')
+	println('  内置: MiniMax MCP (web_search, understand_image)，默认注册，按需启动')
 	println('  额外配置 (~/.config/minimax/mcp.json):')
 	println('  {"servers":{"playwright":{"type":"stdio","command":"npx","args":["-y","@playwright/mcp@latest"]}}}')
 }

@@ -278,9 +278,12 @@ fn main() {
 		return
 	}
 
-	// Load MCP servers if enabled
+	// Always init builtin MCP (lazy - only starts on first tool call)
+	init_mcp_builtin(mut client)
+
+	// Load external MCP servers (mcp.json + extensions) only when --mcp is passed
 	if mcp_enabled {
-		init_mcp(mut client)
+		init_mcp_external(mut client)
 	}
 
 	set_tool_capabilities(client.enable_desktop_control, client.enable_screen_capture)
@@ -315,10 +318,8 @@ fn main() {
 
 	client.logger.log_session_end()
 
-	// Cleanup MCP
-	if mcp_enabled {
-		client.mcp_manager.stop_all()
-	}
+	// Cleanup MCP (always safe to call, even if only builtin was registered)
+	client.mcp_manager.stop_all()
 
 	if exit_code != 0 {
 		exit(exit_code)
@@ -424,12 +425,20 @@ fn print_quota(client ApiClient) {
 	println('')
 }
 
-fn init_mcp(mut client ApiClient) {
-	client.mcp_manager = new_mcp_manager()
-	g_mcp_manager = &client.mcp_manager
+// init_mcp_builtin always registers the built-in MiniMax MCP (lazy start).
+fn init_mcp_builtin(mut client ApiClient) {
+	if g_mcp_manager == unsafe { nil } {
+		g_mcp_manager = &client.mcp_manager
+	}
+	if client.mcp_manager.servers.len == 0 {
+		client.mcp_manager = new_mcp_manager()
+		g_mcp_manager = &client.mcp_manager
+	}
+	if manager_has_server_named(client.mcp_manager, 'MiniMax') {
+		client.enable_tools = true
+		return
+	}
 
-	// Built-in: MiniMax Coding Plan MCP is registered lazily so the process
-	// only starts when one of its tools is actually needed.
 	minimax_mcp_env := {
 		'MINIMAX_API_KEY':  client.api_key
 		'MINIMAX_API_HOST': 'https://api.minimaxi.com'
@@ -437,7 +446,12 @@ fn init_mcp(mut client ApiClient) {
 	client.mcp_manager.add_lazy_server('MiniMax', 'uvx', ['--native-tls', 'minimax-coding-plan-mcp',
 		'-y'], minimax_mcp_env, builtin_mcp_tools())
 	println('[MCP] 已注册内置 MiniMax MCP (web_search, understand_image，按需启动)')
+	client.enable_tools = true
+}
 
+// init_mcp_external loads additional MCP servers from mcp.json and extensions.
+// Only called when --mcp flag is explicitly passed.
+fn init_mcp_external(mut client ApiClient) {
 	// Load additional servers from config file
 	mcp_configs := load_mcp_config()
 	if mcp_configs.len > 0 {
@@ -454,7 +468,6 @@ fn init_mcp(mut client ApiClient) {
 	}
 
 	client.mcp_manager.start_eager_servers()
-	client.enable_tools = true
 
 	// Check if any server connected successfully
 	mut connected := false

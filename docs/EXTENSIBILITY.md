@@ -21,8 +21,8 @@ MCP 用于把外部工具以 stdio JSON-RPC 的方式接入到 CLI。
 
 ### 行为特征
 
-- 使用 --mcp 时会注册内置 MiniMax MCP 能力，但不会立刻拉起子进程；web_search / understand_image 会在首次调用时按需启动。
-- 额外服务从 mcp.json 读取。
+- 内置 MiniMax MCP（web_search、understand_image）默认注册，懒加载（首次调用时才拉起子进程），无需额外标志。
+- 额外服务（mcp.json 中的外部 MCP 服务器）需要显式 --mcp 才会加载。
 - MCP 工具在运行时发现，不是编译期写死。
 - 退出时会尝试统一回收子进程。
 

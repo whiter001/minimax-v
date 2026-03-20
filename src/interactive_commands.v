@@ -82,12 +82,9 @@ fn handle_interactive_exact_command(mut client ApiClient, trimmed string) Intera
 			return .continue_loop
 		}
 		'mcp start' {
-			if client.mcp_manager.servers.len == 0 {
-				init_mcp(mut client)
-			} else {
-				client.mcp_manager.start_all()
-				println('MCP 已检查并启动未运行的服务')
-			}
+			init_mcp_builtin(mut client)
+			client.mcp_manager.start_all()
+			println('MCP 已检查并启动未运行的服务')
 			return .continue_loop
 		}
 		'mcp stop' {

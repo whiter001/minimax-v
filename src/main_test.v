@@ -240,6 +240,43 @@ fn test_handle_interactive_exact_command_unknown_is_not_handled() {
 	assert action == .not_handled
 }
 
+fn test_init_mcp_builtin_is_idempotent() {
+	mut client := new_api_client(default_config())
+	init_mcp_builtin(mut client)
+	first_server_count := client.mcp_manager.servers.len
+	first_tool_count := client.mcp_manager.get_all_tools().len
+
+	init_mcp_builtin(mut client)
+	assert client.mcp_manager.servers.len == first_server_count
+	assert client.mcp_manager.get_all_tools().len == first_tool_count
+	assert first_server_count == 1
+	assert first_tool_count == 2
+}
+
+fn test_mcp_start_does_not_load_external_mcp_config() {
+	mut client := new_api_client(default_config())
+	config_home := os.join_path(os.temp_dir(), 'minimax-mcp-start-regression')
+	os.mkdir_all(config_home) or { panic(err) }
+	old_config_home := os.getenv('MINIMAX_CONFIG_HOME')
+	os.setenv('MINIMAX_CONFIG_HOME', config_home, true)
+	defer {
+		if old_config_home.len > 0 {
+			os.setenv('MINIMAX_CONFIG_HOME', old_config_home, true)
+		} else {
+			os.unsetenv('MINIMAX_CONFIG_HOME')
+		}
+	}
+
+	mcp_json := '{"servers":{"external":{"type":"stdio","command":"definitely-not-a-real-command","args":[]}}}'
+	os.write_file(os.join_path(config_home, 'mcp.json'), mcp_json) or { panic(err) }
+
+	init_mcp_builtin(mut client)
+	action := handle_interactive_exact_command(mut client, 'mcp start')
+	assert action == .continue_loop
+	assert client.mcp_manager.servers.len == 1
+	assert client.mcp_manager.servers[0].name == 'MiniMax'
+}
+
 fn test_handle_interactive_prefixed_command_skill_switches_prompt() {
 	old_skills := skill_registry.skills.clone()
 	old_active := skill_registry.active_skill

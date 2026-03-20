@@ -91,6 +91,15 @@ fn builtin_mcp_tools() []McpTool {
 	return [builtin_web_search_tool(), builtin_understand_image_tool()]
 }
 
+fn manager_has_server_named(m McpManager, name string) bool {
+	for server in m.servers {
+		if server.name == name {
+			return true
+		}
+	}
+	return false
+}
+
 fn (mut m McpManager) add_server(name string, command string, args []string, env map[string]string) {
 	mut server := &McpServer{
 		name:         name
