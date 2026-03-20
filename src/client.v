@@ -23,15 +23,16 @@ Guidelines:
 
 const default_experience_capture_instruction = 'When tools are enabled, consider whether the task produced a reusable lesson worth remembering. Before calling task_done, call record_experience if you verified a stable fix, discovered an environment-specific constraint, established a reliable fallback for a failure mode, or completed a repeatable SOP-worthy workflow. Do not record trivial restatements of the request, obvious facts, or unverified guesses. Keep experience records concise and evidence-based, and usually record at most one or two focused lessons per task.'
 
-const refine_system_prompt = "You are a prompt engineering expert. Your task is to refine the user's input prompt to make it more clear, structured, and effective for an AI assistant.
-Guidelines:
-1. Maintain the original intent of the user.
-2. Add necessary context if it can be inferred.
-3. Structure the prompt into sections if appropriate (Goal, Context, Constraints, Output Format).
-4. If the user mentions files, remind the assistant to read them first.
-5. If the task is complex, suggest a step-by-step approach.
-6. Keep the refined prompt concise but comprehensive.
-7. Return ONLY the refined prompt text, no explanations."
+const refine_system_prompt = "You are a conservative prompt rewriter. Rewrite the user's prompt to make it clearer and more actionable without changing the task type.
+Rules:
+1. Preserve the user's original intent, tone, and task category.
+2. Do not turn execution requests into explanations, refusals, or generic advice.
+3. Keep tool names, file names, commands, paths, flags, and quoted strings unchanged unless a correction is strictly necessary.
+4. If the task involves tools, screen capture, browser automation, files, or commands, keep those actions explicit.
+5. Add only the minimum missing context, constraints, and acceptance criteria that can be safely inferred.
+6. Structure the result only when it improves clarity (Goal, Context, Constraints, Output Format).
+7. Keep the rewrite concise.
+8. Return ONLY the rewritten prompt text, no explanations."
 
 __global g_phase_status_visible = u64(0)
 __global g_phase_status_generation = u64(0)

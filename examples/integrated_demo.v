@@ -288,8 +288,8 @@ pub:
 
 pub struct Session {
 pub:
-	id         string
-	name       string
+	id   string
+	name string
 mut:
 	messages   []Message
 	context    map[string]string
@@ -373,8 +373,8 @@ fn (manager SessionManager) list_sessions() []Session {
 // Canvas 的 stub
 pub struct Canvas {
 pub:
-	id        string
-	title     string
+	id    string
+	title string
 mut:
 	content   string
 	data_type string
@@ -437,7 +437,7 @@ pub:
 	input_type  string
 	output_type string
 mut:
-	compute     ?ComputeFn
+	compute ?ComputeFn
 }
 
 pub struct ComputeGraph {
@@ -489,10 +489,10 @@ fn (graph ComputeGraph) to_dot() string {
 // Cron 的 stub
 pub struct CronJob {
 pub:
-	id              string
-	name            string
-	schedule        string
-	command         string
+	id       string
+	name     string
+	schedule string
+	command  string
 mut:
 	enabled         bool
 	execution_count int
@@ -505,9 +505,9 @@ pub struct CronScheduler {
 pub:
 	storage_path string
 mut:
-	jobs         map[string]CronJob
-	running      bool
-	callback     ?CronCallback
+	jobs     map[string]CronJob
+	running  bool
+	callback ?CronCallback
 }
 
 fn new_cron_scheduler(storage_path string, callback CronCallback) !CronScheduler {

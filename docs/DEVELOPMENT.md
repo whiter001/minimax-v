@@ -50,6 +50,22 @@ v -enable-globals -prod .
 ./minimax_cli --mcp -p "搜索一下 V 语言最新版本"
 ```
 
+### Windows 上安装 uv
+
+维护 uv 的两个常用入口：
+
+```powershell
+irm https://astral.sh/uv/install.ps1 | iex
+winget install --id=astral-sh.uv -e
+```
+
+如果处在代理环境中，先设置当前会话代理，例如：
+
+```powershell
+$env:HTTP_PROXY = 'http://127.0.0.1:7788'
+$env:HTTPS_PROXY = 'http://127.0.0.1:7788'
+```
+
 ## 格式化
 
 ### V 源码

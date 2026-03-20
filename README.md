@@ -221,6 +221,14 @@ bash scripts/install-git-hooks.sh
 
 - V 编译器。
 - MCP 场景下需要对应工具运行时，例如 npx 或 uv。
+- Windows 上安装 uv 的常用方式：
+
+```powershell
+irm https://astral.sh/uv/install.ps1 | iex
+winget install --id=astral-sh.uv -e
+```
+
+- 如果你在代理环境下安装，先为当前 PowerShell 会话设置 `HTTP_PROXY` 和 `HTTPS_PROXY`，例如 `http://127.0.0.1:7788`。
 - 如果使用 SQLite 经验库存储，系统中需要可用的 sqlite3。
 
 ## 许可证
