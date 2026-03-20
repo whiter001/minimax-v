@@ -1,5 +1,5 @@
 /**
- * examples/integrated_demo.v - OpenClaw 功能集成演示
+ * examples/integrated_demo.v - MiniMax-V 功能集成演示
  *
  * 演示如何在 MiniMax-V 中集成 Sessions、Canvas、Nodes、Cron 四个模块
  * 场景：股票分析和定期报告系统
@@ -115,7 +115,7 @@ fn canvas_demo() ! {
 
 	// 导出为 HTML
 	html := chart_canvas.export_html()
-	println('✓ 可导出为 HTML 用于浏览器预览')
+	println('✓ 可导出为 HTML: ${html.len} bytes')
 }
 
 // 演示 3: Nodes 计算图
@@ -280,14 +280,17 @@ fn cron_demo() ! {
 
 // Sessions 的 stub（完整实现在 src/sessions.v）
 pub struct Message {
+pub:
 	role      string
 	content   string
 	timestamp i64
 }
 
 pub struct Session {
+pub:
 	id         string
 	name       string
+mut:
 	messages   []Message
 	context    map[string]string
 	created_at i64
@@ -295,9 +298,11 @@ pub struct Session {
 }
 
 pub struct SessionManager {
+pub:
+	storage_path string
+mut:
 	sessions          map[string]Session
 	active_session_id string
-	storage_path      string
 }
 
 fn new_session_manager(storage_path string) !SessionManager {
@@ -316,7 +321,7 @@ fn (mut manager SessionManager) create_session(name string) !Session {
 	session := Session{
 		id:         id
 		name:       name
-		messages:   []
+		messages:   []Message{}
 		context:    map[string]string{}
 		created_at: time.now().unix()
 		updated_at: time.now().unix()
@@ -367,8 +372,10 @@ fn (manager SessionManager) list_sessions() []Session {
 
 // Canvas 的 stub
 pub struct Canvas {
+pub:
 	id        string
 	title     string
+mut:
 	content   string
 	data_type string
 }
@@ -404,7 +411,7 @@ fn (mut canvas Canvas) add_table(headers []string, rows [][]string) {
 fn (mut canvas Canvas) add_chart(title string, data map[string]f64) {
 	mut result := '${title}\n\n'
 	for label, value in data {
-		bar_width := (value / 60.0 * 30.0) as int
+		bar_width := int(value / 60.0 * 30.0)
 		result += '${label:8} │ ${'█'.repeat(bar_width)} ${value:.1f}\n'
 	}
 	canvas.content = result
@@ -424,14 +431,17 @@ fn (canvas Canvas) export_html() string {
 pub type ComputeFn = fn (string) string
 
 pub struct ComputeNode {
+pub:
 	id          string
 	name        string
 	input_type  string
 	output_type string
-	compute     ComputeFn
+mut:
+	compute     ?ComputeFn
 }
 
 pub struct ComputeGraph {
+mut:
 	nodes           map[string]ComputeNode
 	edges           []string
 	execution_order []string
@@ -465,7 +475,9 @@ fn (graph ComputeGraph) execute(input string) !string {
 	mut result := input
 	for node_id in graph.execution_order {
 		node := graph.nodes[node_id] or { continue }
-		result = node.compute(result)
+		if c := node.compute {
+			result = c(result)
+		}
 	}
 	return result
 }
@@ -476,10 +488,12 @@ fn (graph ComputeGraph) to_dot() string {
 
 // Cron 的 stub
 pub struct CronJob {
+pub:
 	id              string
 	name            string
 	schedule        string
 	command         string
+mut:
 	enabled         bool
 	execution_count int
 	last_run        i64
@@ -488,10 +502,12 @@ pub struct CronJob {
 pub type CronCallback = fn (CronJob) !
 
 pub struct CronScheduler {
+pub:
+	storage_path string
+mut:
 	jobs         map[string]CronJob
 	running      bool
-	callback     CronCallback
-	storage_path string
+	callback     ?CronCallback
 }
 
 fn new_cron_scheduler(storage_path string, callback CronCallback) !CronScheduler {
@@ -526,7 +542,9 @@ fn (mut scheduler CronScheduler) tick() ! {
 	// 模拟执行
 	for id, mut job in scheduler.jobs {
 		if job.enabled {
-			scheduler.callback(job)!
+			if cb := scheduler.callback {
+				cb(job)!
+			}
 			job.execution_count++
 			job.last_run = time.now().unix()
 			scheduler.jobs[id] = job

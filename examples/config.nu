@@ -1,9 +1,16 @@
 # 快捷命令调用封装
-# 如果是windows就是minimax_cli.exe，如果是macos就是minimax_cli
+# 默认已开启: enable_tools, auto_skills, enable_logging
+# 仅显式启用: refine(提示词优化), trajectory(轨迹记录)
+#
+# 使用方式:
+#   source config.nu   # 加载函数
+#   mi "帮我重构 main.v"  # 基础模式
+#   ma "用 playwright 打开 GitHub"  # MCP 模式
 def mi [msg: string] {
-  minimax_cli --refine --auto-skills  --enable-tools --log --debug --trajectory -system '你是各个领域的专家，给你的任务都可以很好的帮我执行完成，任务完成后，如果这是一个新的模式（比如你发现了 x.com 的接口结构），必须调用 record_experience。' -p $msg
+  minimax_cli --refine --trajectory -system '你是各个领域的编程专家，擅长分析和解决复杂的技术问题。当你发现新的技术模式，必须调用 record_experience 记录经验。完成任务后主动总结关键步骤和可能的优化点。' -p $msg
 }
-# 多mcp版本的调用封装
+
+# 多 MCP 版本的调用封装（支持 playwright 等浏览器自动化）
 def ma [msg: string] {
-  minimax_cli --refine --auto-skills --mcp --enable-tools --log --debug --trajectory --system '用playwright打开url,你是各个领域的专家，给你的任务都可以很好的帮我执行完成' -p $msg
+  minimax_cli --refine --trajectory --mcp -system '你是专业的浏览器自动化助手，熟练使用 playwright 完成任务。善于发现页面结构和新的接口模式，并记录经验。' -p $msg
 }

@@ -48,8 +48,8 @@ fn default_config() Config {
 		max_rounds:             5000
 		token_limit:            80000
 		system_prompt:          ''
-		enable_tools:           false
-		auto_skills:            false
+		enable_tools:           true
+		auto_skills:            true
 		auto_check_sops:        true
 		auto_write_skills:      true
 		auto_upgrade_sops:      true
@@ -57,8 +57,8 @@ fn default_config() Config {
 		auto_confirm_refine:    false
 		knowledge_sync_mode:    'balanced'
 		enable_desktop_control: false
-		enable_screen_capture:  false
-		enable_logging:         false
+		enable_screen_capture:  true
+		enable_logging:         true
 		debug:                  false
 		workspace:              ''
 	}

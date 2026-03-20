@@ -1,53 +1,89 @@
 # MiniMax CLI 配置文件示例
 # 路径: ~/.config/minimax/config
 #
-# 所有配置项均可通过环境变量覆盖（优先级更高）
-# 环境变量格式: MINIMAX_<KEY> (如 MINIMAX_API_KEY)
+# 配置优先级（从高到低）：
+#   1. 命令行参数（如 --enable-tools）
+#   2. 环境变量（如 MINIMAX_API_KEY）
+#   3. 本配置文件
+#   4. 默认值
+#
+# 环境变量格式：MINIMAX_<KEY>（全大写）
+# 例如：MINIMAX_API_KEY、MINIMAX_API_URL、MINIMAX_ENABLE_TOOLS、MINIMAX_KNOWLEDGE_SYNC_MODE
 
 # === API 设置 ===
+# 未配置时默认值：空字符串；可填任意有效 API Key。
 api_key=sk-cp-your-api-key-here
+# 未配置时默认值：https://api.minimaxi.com/anthropic/v1/messages；可填任意 API 地址。
+# 环境变量：MINIMAX_API_URL
 api_url=https://api.minimaxi.com/anthropic/v1/messages
 
 # === 模型参数 ===
+# 未配置时默认值：MiniMax-M2.7；可填任意模型名字符串。
 model=MiniMax-M2.7
+# 未配置时默认值：0.7；可配置范围：0.0 < 值 <= 1.0。
 temperature=0.7
-# 单次回答最多生成多少 token。单位是 token，不是字符数。
-# 对 MiniMax M2.5，日常编码场景推荐 32768，兼顾长输出与上下文余量。
+# 未配置时默认值：102400；可配置范围：1-204800。
+# 下面用 32768 作为示例值，适合大多数编码场景；想用默认值可改回 102400。
 max_tokens=32768
 
 # === 功能开关 ===
-# 启用 AI 工具调用（AI 可主动读写文件、执行命令）
+# 未配置时默认值：true；可配置值：true / false / 1 / 0。
+# 启用 AI 工具调用后，模型可以主动读写文件、执行命令。
 enable_tools=true
-# 任务执行前自动检查匹配的全局 SOP（~/.config/minimax/sops/<skill>/SOP.md）
+# 未配置时默认值：true；可配置值：true / false / 1 / 0。
+# 开启后会优先启用工具调用。注意：auto_skills=true 时会自动启用 enable_tools。
+auto_skills=true
+# 未配置时默认值：true；可配置值：true / false / 1 / 0。
+# 任务执行前自动检查匹配的全局 SOP（~/.config/minimax/sops/<skill>/SOP.md）。
 auto_check_sops=true
-# 启用鼠标/键盘控制工具（高权限，默认建议关闭）
+# 未配置时默认值：true；可配置值：true / false / 1 / 0。
+# 开启后，经验沉淀会自动写回全局 skills。
+auto_write_skills=true
+# 未配置时默认值：true；可配置值：true / false / 1 / 0。
+# 开启后，经验沉淀会自动升级全局 SOP。
+auto_upgrade_sops=true
+# 未配置时默认值：false；可配置值：true / false / 1 / 0。
+# 启用鼠标/键盘控制工具，高权限，默认建议关闭。
 enable_desktop_control=false
-# 启用屏幕截图工具（用于截图后识图）
-enable_screen_capture=false
-# 启用文件日志（日志目录: ~/.config/minimax/logs/）
-enable_logging=false
-# 启用调试日志
+# 未配置时默认值：true；可配置值：true / false / 1 / 0。
+# 启用屏幕截图工具，用于截图后识图。
+enable_screen_capture=true
+# 未配置时默认值：true；可配置值：true / false / 1 / 0。
+# 启用文件日志，日志目录：~/.config/minimax/logs/。
+enable_logging=true
+# 未配置时默认值：false；可配置值：true / false / 1 / 0。
+# 启用调试日志。
 debug=false
 
 # === 高级设置 ===
-# 最大工具调用轮数 (1-200)
+# 未配置时默认值：5000；可配置范围：1-5000。
+# 下面用 100 作为示例值，表示最多进行 100 轮工具调用。
+# 环境变量：MINIMAX_MAX_ROUNDS
 max_rounds=100
-# 上下文自动摘要阈值 (token 数)。达到该阈值后，旧消息会被自动压缩摘要。
-# 推荐 100000，适合常见的 enable_tools / MCP 编码场景。
+# 未配置时默认值：80000；可配置范围：1-200000。
+# 达到阈值后，旧消息会自动压缩摘要；100000 适合常见的工具调用 / MCP 场景。
+# 环境变量：MINIMAX_TOKEN_LIMIT
 token_limit=100000
-# 工作目录（相对路径基准）
-# 仅影响相对路径、项目级 skills(.agents/skills)、项目级 commands(.minimax/commands)
-# 不影响全局配置和全局知识库；经验库固定存放在 ~/.config/minimax/knowledge/
+# 未配置时默认值：空字符串；可填任意工作目录路径。
+# 仅影响相对路径、项目级 skills(.agents/skills)、项目级 commands(.minimax/commands)。
+# 不影响全局配置和全局知识库；经验库固定存放在 ~/.config/minimax/knowledge/。
+# 环境变量：MINIMAX_WORKSPACE
 # workspace=/path/to/your/project
-# 系统提示词（可选）
+
+# === 系统提示词 ===
+# 未配置时默认值：空字符串；可填任意系统提示词。
+# 环境变量：MINIMAX_SYSTEM_PROMPT
 # system_prompt=你是一个专业的编程助手
 
 # === 提示词优化 (Refine) ===
-# 开启提示词自动优化（执行前先由AI完善Prompt）
+# 未配置时默认值：false；可配置值：true / false / 1 / 0。
+# 开启提示词自动优化，执行前先由 AI 完善 Prompt。
 # auto_refine=false
-# 启用自动优化并跳过确认（静默模式）
+# 未配置时默认值：false；可配置值：true / false / 1 / 0。
+# 启用自动优化并跳过确认，适合静默模式。
 # auto_confirm_refine=false
 
-auto_write_skills=true
-auto_upgrade_sops=true
+# === 知识同步 ===
+# 未配置时默认值：balanced；可配置值：concise / balanced / strict。
+# concise：更精简；balanced：默认平衡模式；strict：更严格地同步。
 knowledge_sync_mode=balanced

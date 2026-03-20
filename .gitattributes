@@ -1,4 +1,13 @@
+# 统一所有文本文件使用 LF line endings
+* text=auto
+
+# 明确指定跨平台一致的性格式
+*.v text eol=lf
+*.md text eol=lf
 *.sh text eol=lf
 *.bash text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf

@@ -1,7 +1,7 @@
 # Compiled binaries
 minimax_cli
 minimax_cli_new
-minimax_cli.exe
+*.exe
 minimax-v
 
 # V compiler cache

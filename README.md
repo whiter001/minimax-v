@@ -115,15 +115,15 @@ temperature=0.7
 max_tokens=102400
 max_rounds=5000
 token_limit=80000
-enable_tools=false
-auto_skills=false
+enable_tools=true
+auto_skills=true
 auto_check_sops=true
 auto_write_skills=true
 auto_upgrade_sops=true
 knowledge_sync_mode=balanced
 enable_desktop_control=false
-enable_screen_capture=false
-enable_logging=false
+enable_screen_capture=true
+enable_logging=true
 debug=false
 ```
 
