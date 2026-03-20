@@ -1,6 +1,7 @@
 module main
 
 import os
+import strings
 import time
 
 const understand_image_downsample_threshold_bytes = i64(1200000)
@@ -315,6 +316,26 @@ fn parse_int_input(input map[string]string, key string, default_value int) int {
 
 fn escape_powershell_double_quoted(s string) string {
 	return s.replace('`', '``').replace('"', '`"').replace('$', '`$')
+}
+
+fn escape_windows_sendkeys_literal(s string) string {
+	mut out := strings.new_builder(s.len * 2)
+	for ch in s.runes() {
+		match ch {
+			`{` { out.write_string('{{}') }
+			`}` { out.write_string('{}}') }
+			`+` { out.write_string('{+}') }
+			`^` { out.write_string('{^}') }
+			`%` { out.write_string('{%}') }
+			`~` { out.write_string('{~}') }
+			`(` { out.write_string('{(}') }
+			`)` { out.write_string('{)}') }
+			`[` { out.write_string('{[}') }
+			`]` { out.write_string('{]}') }
+			else { out.write_rune(ch) }
+		}
+	}
+	return out.str()
 }
 
 fn escape_applescript_string(s string) string {
@@ -1885,23 +1906,15 @@ __D__action = "__ACTION__"
 __D__text = "__TEXT__"
 __D__keys = "__KEYS__"
 
-function Escape-LiteralSendKeys([string]__D__s) {
-	__D__chars = @("+","^","%","~","(",")","{","}","[","]")
-	foreach (__D__c in __D__chars) {
-		__D__s = __D__s.Replace(__D__c, "{"+__D__c+"}")
-	}
-	return __D__s
-}
-
 if (__D__action -eq "type") {
-	[System.Windows.Forms.SendKeys]::SendWait((Escape-LiteralSendKeys __D__text))
+	[System.Windows.Forms.SendKeys]::SendWait(__D__text)
 } elseif (__D__action -eq "send") {
 	[System.Windows.Forms.SendKeys]::SendWait(__D__keys)
 }
 Write-Output "ok"
 '
 	ps_script = ps_script.replace('__ACTION__', safe_action)
-	ps_script = ps_script.replace('__TEXT__', escape_powershell_double_quoted(text))
+	ps_script = ps_script.replace('__TEXT__', escape_powershell_double_quoted(escape_windows_sendkeys_literal(text)))
 	ps_script = ps_script.replace('__KEYS__', escape_powershell_double_quoted(keys))
 	ps_script = ps_script.replace('__D__', '$')
 	_ := run_powershell_script(ps_script) or { return 'Error: ${err.msg()}' }
@@ -2068,9 +2081,11 @@ fn discover_understand_image_attempts(mut mcp McpManager) []UnderstandImageAttem
 	if discovered_path.len > 0 {
 		add_understand_image_attempt(mut attempts, discovered_path, discovered_prompt)
 	}
+	add_understand_image_attempt(mut attempts, 'image_source', 'prompt')
 	add_understand_image_attempt(mut attempts, 'image_path', 'prompt')
 	add_understand_image_attempt(mut attempts, 'path', 'prompt')
 	add_understand_image_attempt(mut attempts, 'file', 'prompt')
+	add_understand_image_attempt(mut attempts, 'image_source', 'question')
 	add_understand_image_attempt(mut attempts, 'image_path', 'question')
 	add_understand_image_attempt(mut attempts, 'path', 'question')
 	add_understand_image_attempt(mut attempts, 'file', 'question')
@@ -2112,6 +2127,9 @@ fn screen_analyze_tool_with_mcp(mut mcp McpManager, input map[string]string, wor
 	}
 
 	mut image_path := input['image_path'] or { '' }
+	if image_path.len == 0 {
+		image_path = input['image_source'] or { '' }
+	}
 	if image_path.len == 0 {
 		image_path = input['path'] or { '' }
 	}
@@ -2521,7 +2539,7 @@ fn get_tools_schema_json() string {
 		'{"name":"mouse_control","description":"Control mouse movement/click/scroll on desktop. Requires desktop control to be explicitly enabled.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: move, click, or scroll","enum":["move","click","scroll"]},"x":{"type":"integer","description":"X coordinate for move/click"},"y":{"type":"integer","description":"Y coordinate for move/click"},"button":{"type":"string","description":"Mouse button for click","enum":["left","right","middle"]},"clicks":{"type":"integer","description":"Click count (1-5) for click action"},"delta":{"type":"integer","description":"Scroll delta for scroll action (positive/negative)"}},"required":["action"]}},' +
 		'{"name":"keyboard_control","description":"Control keyboard input on desktop. Requires desktop control to be explicitly enabled.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: type literal text or send raw keys","enum":["type","send"]},"text":{"type":"string","description":"Literal text for type action"},"keys":{"type":"string","description":"Raw SendKeys pattern for send action (e.g. ^l, {ENTER})"}},"required":["action"]}},' +
 		'{"name":"capture_screen","description":"Capture desktop screenshot and save to a PNG file. Requires screen capture to be explicitly enabled.","input_schema":{"type":"object","properties":{"path":{"type":"string","description":"Output file path (.png). If omitted, temp path is used."},"x":{"type":"integer","description":"Region X (optional)"},"y":{"type":"integer","description":"Region Y (optional)"},"width":{"type":"integer","description":"Region width (optional, with height)"},"height":{"type":"integer","description":"Region height (optional, with width)"}},"required":[]}},' +
-		'{"name":"screen_analyze","description":"Capture screen (or use existing image path) then call MCP understand_image to analyze it.","input_schema":{"type":"object","properties":{"image_path":{"type":"string","description":"Existing image file path. If omitted, screen is captured first."},"prompt":{"type":"string","description":"Analysis instruction sent to understand_image"},"x":{"type":"integer","description":"Region X for capture when image_path omitted"},"y":{"type":"integer","description":"Region Y for capture when image_path omitted"},"width":{"type":"integer","description":"Region width for capture when image_path omitted"},"height":{"type":"integer","description":"Region height for capture when image_path omitted"}},"required":[]}},' +
+		'{"name":"screen_analyze","description":"Capture screen (or use existing image path) then call MCP understand_image to analyze it.","input_schema":{"type":"object","properties":{"image_path":{"type":"string","description":"Existing image file path. If omitted, screen is captured first."},"image_source":{"type":"string","description":"Alias of image_path for understand_image compatibility."},"prompt":{"type":"string","description":"Analysis instruction sent to understand_image"},"x":{"type":"integer","description":"Region X for capture when image_path omitted"},"y":{"type":"integer","description":"Region Y for capture when image_path omitted"},"width":{"type":"integer","description":"Region width for capture when image_path omitted"},"height":{"type":"integer","description":"Region height for capture when image_path omitted"}},"required":[]}},' +
 		'{"name":"match_sop","description":"Find the best matching global SOP for the current task before taking action. Returns the top matching SOP name, file path, score, and matched terms so you can read the SOP file next.","input_schema":{"type":"object","properties":{"task":{"type":"string","description":"The user task, subtask, or current objective to match against available SOPs."},"limit":{"type":"integer","description":"Optional number of top matches to return. Default 3."}},"required":["task"]}},' +
 		'{"name":"record_experience","description":"Record an experience into the local knowledge base and trigger configured automation such as syncing global skills and SOPs. You can either pass payload using the same formats as experience add, or provide structured fields directly.","input_schema":{"type":"object","properties":{"payload":{"type":"string","description":"Optional full payload in JSON, key=value, or pipe format."},"skill":{"type":"string","description":"Skill or domain name."},"title":{"type":"string","description":"Short title of the experience."},"scenario":{"type":"string","description":"Context or triggering scenario."},"action":{"type":"string","description":"Action taken."},"action_taken":{"type":"string","description":"Alias for action."},"outcome":{"type":"string","description":"Observed result."},"tags":{"type":"string","description":"Comma-separated tags."},"confidence":{"type":"integer","description":"Confidence from 1 to 5."},"source":{"type":"string","description":"Optional source label."}},"required":[]}},' +
 		'{"name":"session_note","description":"Persistent memory across sessions. Use this to save important context, decisions, project info, or user preferences that should be remembered in future sessions. Actions: read (get all notes), write (overwrite notes), append (add to notes).","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"The action: read, write, or append","enum":["read","write","append"]},"content":{"type":"string","description":"Content to write/append (required for write and append actions)"}},"required":["action"]}},' +

@@ -54,6 +54,7 @@ fn test_lazy_mcp_server_exposes_preset_tools_before_start() {
 fn test_builtin_understand_image_schema_includes_aliases() {
 	tool := builtin_understand_image_tool()
 	assert tool.raw_schema.contains('"image_path"')
+	assert tool.raw_schema.contains('"image_source"')
 	assert tool.raw_schema.contains('"path"')
 	assert tool.raw_schema.contains('"file"')
 	assert tool.raw_schema.contains('"prompt"')

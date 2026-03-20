@@ -584,6 +584,7 @@ fn test_get_tools_schema_json_valid() {
 	assert json.contains('keyboard_control')
 	assert json.contains('capture_screen')
 	assert json.contains('screen_analyze')
+	assert json.contains('image_source')
 	assert json.contains('match_sop')
 	assert json.contains('record_experience')
 	assert json.contains('session_note')
@@ -662,6 +663,14 @@ fn test_parse_macos_send_keys_textual_special_key() {
 	}
 	assert send.key_code == 36
 	assert send.modifiers == ['command down', 'shift down']
+}
+
+fn test_escape_windows_sendkeys_literal_handles_special_chars() {
+	assert escape_windows_sendkeys_literal('{') == '{{}'
+	assert escape_windows_sendkeys_literal('}') == '{}}'
+	assert escape_windows_sendkeys_literal('+') == '{+}'
+	assert escape_windows_sendkeys_literal('1+3') == '1{+}3'
+	assert escape_windows_sendkeys_literal('^%~()[]') == '{^}{%}{~}{(}{)}{[}{]}'
 }
 
 fn test_build_macos_keyboard_script_type() {

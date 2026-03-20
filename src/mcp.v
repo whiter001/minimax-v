@@ -80,11 +80,12 @@ fn builtin_understand_image_tool() McpTool {
 	return new_mcp_tool('understand_image', 'Analyze an image file and answer questions about it.',
 		[
 		new_mcp_tool_param('image_path', 'Path to the image file.', 'string', true),
+		new_mcp_tool_param('image_source', 'Alias of image_path.', 'string', false),
 		new_mcp_tool_param('path', 'Alias of image_path.', 'string', false),
 		new_mcp_tool_param('file', 'Alias of image_path.', 'string', false),
 		new_mcp_tool_param('prompt', 'Analysis instruction or question.', 'string', false),
 		new_mcp_tool_param('question', 'Alias of prompt.', 'string', false),
-	], '{"type":"object","properties":{"image_path":{"type":"string","description":"Path to the image file."},"path":{"type":"string","description":"Alias of image_path."},"file":{"type":"string","description":"Alias of image_path."},"prompt":{"type":"string","description":"Analysis instruction or question."},"question":{"type":"string","description":"Alias of prompt."}},"required":["image_path"]}')
+	], '{"type":"object","properties":{"image_path":{"type":"string","description":"Path to the image file."},"image_source":{"type":"string","description":"Alias of image_path."},"path":{"type":"string","description":"Alias of image_path."},"file":{"type":"string","description":"Alias of image_path."},"prompt":{"type":"string","description":"Analysis instruction or question."},"question":{"type":"string","description":"Alias of prompt."}},"required":["image_path"]}')
 }
 
 fn builtin_mcp_tools() []McpTool {
