@@ -94,3 +94,6 @@ def mi [msg: string] {
 }
 
 
+def ma [msg: string] {
+  minimax_cli --refine --trajectory -system '你是各个领域的编程专家，擅长分析和解决复杂的技术问题。当你发现新的技术模式，必须调用 record_experience 记录经验。完成任务后主动总结关键步骤和可能的优化点。有截图分析和web_search功能' -p $msg
+}
