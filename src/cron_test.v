@@ -488,3 +488,171 @@ fn test_cron_scheduler_tick_propagates_callback_error() {
 	sched.stop()
 	assert false, '回调失败时 tick 应返回错误'
 }
+
+// ──────────────────────────────────────────────
+// TimerManager 测试
+// ──────────────────────────────────────────────
+
+fn test_timer_set_timeout_and_list() {
+	mut mgr := new_timer_manager()
+	timer := mgr.set_timeout('my-timeout', 60, 'echo hello') or {
+		assert false, 'set_timeout 应成功: ${err}'
+		return
+	}
+	assert timer.name == 'my-timeout'
+	assert timer.timer_type == .timeout
+	assert timer.interval_sec == 0
+
+	timers := mgr.list_timers()
+	assert timers.len == 1
+	assert timers[0].id == timer.id
+}
+
+fn test_timer_set_interval_and_list() {
+	mut mgr := new_timer_manager()
+	timer := mgr.set_interval('my-interval', 30, 'echo tick') or {
+		assert false, 'set_interval 应成功: ${err}'
+		return
+	}
+	assert timer.name == 'my-interval'
+	assert timer.timer_type == .interval
+	assert timer.interval_sec == 30
+
+	timers := mgr.list_timers()
+	assert timers.len == 1
+}
+
+fn test_timer_set_timeout_invalid_delay() {
+	mut mgr := new_timer_manager()
+	mgr.set_timeout('bad', 0, 'echo nope') or { return }
+	assert false, 'delay=0 应返回错误'
+}
+
+fn test_timer_set_interval_invalid_interval() {
+	mut mgr := new_timer_manager()
+	mgr.set_interval('bad', -5, 'echo nope') or { return }
+	assert false, '负数 interval 应返回错误'
+}
+
+fn test_timer_clear_by_id() {
+	mut mgr := new_timer_manager()
+	timer := mgr.set_timeout('to-clear', 60, 'echo clear-me') or { return }
+	assert mgr.clear_timer(timer.id) == true
+	assert mgr.list_timers().len == 0
+}
+
+fn test_timer_clear_by_name_removes_all() {
+	mut mgr := new_timer_manager()
+	_ := mgr.set_interval('same-name', 10, 'echo first') or { return }
+	_ := mgr.set_interval('same-name', 20, 'echo second') or { return }
+	assert mgr.list_timers().len == 2
+	removed := mgr.clear_timer_by_name('same-name')
+	assert removed == 2
+	assert mgr.list_timers().len == 0
+}
+
+fn test_timer_clear_nonexistent_returns_false() {
+	mut mgr := new_timer_manager()
+	assert mgr.clear_timer('not-exist') == false
+	assert mgr.clear_timer_by_name('not-exist') == 0
+}
+
+fn test_timer_tick_timeout_removed_after_due() {
+	tmp := cron_test_tmp_dir('timer_tick_t1')
+	marker := os.join_path(tmp, 't1_marker.txt')
+	os.mkdir_all(tmp) or { return }
+	mut mgr := new_timer_manager()
+	_ := mgr.set_timeout('t1', 1, 'echo timeout') or { return }
+	defer { os.rmdir_all(tmp) or {} }
+
+	time.sleep(1200 * time.millisecond)
+	executed, _ := mgr.tick_execute(fn [marker] (t Timer) ! {
+		os.write_file(marker, t.id)!
+	})
+	assert executed.len == 1
+	assert mgr.list_timers().len == 0, 'timeout 执行后应被删除'
+	assert os.exists(marker), '回调应被调用'
+}
+
+fn test_timer_tick_interval_advances_next_run() {
+	mut mgr := new_timer_manager()
+	_ := mgr.set_interval('t2', 1, 'echo interval') or { return }
+
+	time.sleep(1200 * time.millisecond)
+	before := mgr.list_timers()[0].next_run
+	executed, _ := mgr.tick_execute(fn (t Timer) ! {})
+	assert executed.len == 1
+	after := mgr.list_timers()[0].next_run
+	assert after > before, 'interval 的 next_run 应推进'
+}
+
+fn test_timer_tick_failed_timeout_still_removed() {
+	mut mgr := new_timer_manager()
+	_ := mgr.set_timeout('t3', 1, 'exit 1') or { return }
+
+	time.sleep(1200 * time.millisecond)
+	executed, had_failure := mgr.tick_execute(fn (t Timer) ! {
+		return error('simulated failure')
+	})
+	assert executed.len == 1
+	assert had_failure, '失败回调应设置 had_failure 为 true'
+	assert mgr.list_timers().len == 0, '失败 timeout 仍应被删除'
+}
+
+fn test_timer_tick_failed_interval_still_advances() {
+	mut mgr := new_timer_manager()
+	_ := mgr.set_interval('t4', 1, 'exit 1') or { return }
+
+	time.sleep(1200 * time.millisecond)
+	before := mgr.list_timers()[0].next_run
+	executed, had_failure := mgr.tick_execute(fn (t Timer) ! {
+		return error('simulated failure')
+	})
+	assert executed.len == 1
+	assert had_failure, '失败回调应设置 had_failure 为 true'
+	after := mgr.list_timers()[0].next_run
+	assert after > before, '失败 interval 的 next_run 仍应推进，避免无限重试'
+}
+
+fn test_timer_enabled_toggle() {
+	mut mgr := new_timer_manager()
+	timer := mgr.set_timeout('t5', 60, 'echo enabled') or { return }
+	mgr.set_timer_enabled(timer.id, false) or { return }
+	assert mgr.list_timers()[0].enabled == false
+
+	mgr.set_timer_enabled(timer.id, true) or { return }
+	assert mgr.list_timers()[0].enabled == true
+}
+
+fn test_timer_stats() {
+	// 验证 get_timer_stats 返回正确的计数
+	mut mgr := new_timer_manager()
+	_ = mgr.set_timeout('stat-timeout-1', 60, 'echo s1') or { return }
+	_ = mgr.set_timeout('stat-timeout-2', 60, 'echo s2') or { return }
+	_ = mgr.set_interval('stat-interval-3', 30, 'echo i1') or { return }
+	mut t4 := mgr.set_timeout('stat-timeout-4-disabled', 60, 'echo s4') or { return }
+	mgr.set_timer_enabled(t4.id, false) or { return }
+
+	timers := mgr.list_timers()
+	stats := mgr.get_timer_stats()
+
+	// 验证总数
+	assert timers.len == 4, '应有 4 个定时器，实际=${timers.len}'
+	assert stats['total_timers'] == timers.len
+
+	// 验证 enabled/disabled 计数
+	enabled_count := timers.filter(it.enabled).len
+	assert stats['enabled'] == enabled_count
+	assert stats['disabled'] == 1
+
+	// 验证 type 计数
+	timeout_count := timers.filter(it.timer_type == .timeout).len
+	interval_count := timers.filter(it.timer_type == .interval).len
+	assert stats['timeouts'] == timeout_count
+	assert stats['intervals'] == interval_count
+	assert timeout_count == 3
+	assert interval_count == 1
+
+	// 验证禁用功能
+	assert !mgr.get_timer(t4.id) or { return }.enabled
+}

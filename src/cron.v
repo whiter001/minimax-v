@@ -8,6 +8,7 @@
  * - 任务持久化
  */
 import json
+import rand
 import time
 import os
 
@@ -465,5 +466,210 @@ pub fn (scheduler CronScheduler) get_stats() map[string]int {
 		'enabled_jobs':     enabled
 		'disabled_jobs':    disabled
 		'total_executions': total_executions
+	}
+}
+
+// ──────────────────────────────────────────────
+// 可取消的定时器（类似 JS setTimeout/setInterval）
+// ──────────────────────────────────────────────
+
+// Timer 类型：timeout（一次）还是 interval（重复）
+pub enum TimerType {
+	timeout  // setTimeout，一次性
+	interval // setInterval，重复执行
+}
+
+pub struct Timer {
+pub mut:
+	id           string // 唯一标识符
+	name         string // 可读名称，用于取消
+	timer_type   TimerType
+	interval_sec i64    // 间隔秒数（timeout 为 0）
+	next_run     i64    // 下次执行时间戳
+	command      string // 待执行的命令
+	enabled      bool   // 是否启用
+	created_at   i64    // 创建时间
+}
+
+// Timer 管理器
+// NOTE: TimerManager is not thread-safe. All operations must happen on a single
+// thread. If concurrent access is needed in the future, add a sync.Mutex or use
+// channel-based communication.
+pub struct TimerManager {
+pub mut:
+	timers map[string]Timer
+}
+
+// 生成唯一 timer ID，使用 rand.uuid_v4() 确保全局唯一
+fn new_timer_id() string {
+	return 'timer_${rand.uuid_v4()}'
+}
+
+// 创建新的 Timer 管理器
+pub fn new_timer_manager() TimerManager {
+	return TimerManager{
+		timers: map[string]Timer{}
+	}
+}
+
+// 添加一个一次性定时器（类似 setTimeout）
+pub fn (mut mgr TimerManager) set_timeout(name string, delay_seconds int, command string) !Timer {
+	if delay_seconds <= 0 {
+		return error('delay 秒数必须大于 0')
+	}
+	id := new_timer_id()
+	timer := Timer{
+		id:           id
+		name:         name
+		timer_type:   .timeout
+		interval_sec: 0
+		next_run:     time.now().unix() + delay_seconds
+		command:      command
+		enabled:      true
+		created_at:   time.now().unix()
+	}
+	mgr.timers[id] = timer
+	return timer
+}
+
+// 添加一个重复定时器（类似 setInterval）
+pub fn (mut mgr TimerManager) set_interval(name string, interval_seconds int, command string) !Timer {
+	if interval_seconds <= 0 {
+		return error('interval 秒数必须大于 0')
+	}
+	id := new_timer_id()
+	timer := Timer{
+		id:           id
+		name:         name
+		timer_type:   .interval
+		interval_sec: interval_seconds
+		next_run:     time.now().unix() + interval_seconds
+		command:      command
+		enabled:      true
+		created_at:   time.now().unix()
+	}
+	mgr.timers[id] = timer
+	return timer
+}
+
+// 清除所有定时器（测试/重置用）
+pub fn (mut mgr TimerManager) clear_all() {
+	mgr.timers.clear()
+}
+
+// 按 ID 取消定时器
+pub fn (mut mgr TimerManager) clear_timer(id string) bool {
+	if id in mgr.timers {
+		mgr.timers.delete(id)
+		return true
+	}
+	return false
+}
+
+// 按名称取消定时器（取消所有同名定时器）
+// 先收集后删除，避免遍历 map 时直接修改导致不稳定行为。
+pub fn (mut mgr TimerManager) clear_timer_by_name(name string) int {
+	mut to_remove := []string{}
+	for id, timer in mgr.timers {
+		if timer.name == name {
+			to_remove << id
+		}
+	}
+	for id in to_remove {
+		mgr.timers.delete(id)
+	}
+	return to_remove.len
+}
+
+// 检查并执行到期的定时器，返回 (执行的ID列表, 是否有失败)
+// 先收集待修改项，再统一应用，避免遍历 map 时直接修改导致不稳定行为。
+pub fn (mut mgr TimerManager) tick_execute(execute_fn fn (Timer) !) ([]string, bool) {
+	now := time.now().unix()
+	mut executed := []string{}
+	mut to_delete := []string{}
+	mut to_update := []Timer{}
+	mut any_failed := false
+
+	for id, timer in mgr.timers {
+		if !timer.enabled {
+			continue
+		}
+
+		if now >= timer.next_run {
+			execute_fn(timer) or {
+				eprintln('Timer ${timer.id} 执行失败: ${err}')
+				any_failed = true
+			}
+
+			if timer.timer_type == .timeout {
+				// timeout 类型无论成功失败都只执行一次
+				to_delete << id
+			} else {
+				// interval 类型无论成功失败都推进下次执行，避免失败时无限重试
+				mut updated_timer := timer
+				updated_timer.next_run = now + timer.interval_sec
+				to_update << updated_timer
+			}
+			executed << id
+		}
+	}
+
+	for id in to_delete {
+		mgr.timers.delete(id)
+	}
+	for timer in to_update {
+		mgr.timers[timer.id] = timer
+	}
+
+	return executed, any_failed
+}
+
+// 列出所有定时器
+pub fn (mgr TimerManager) list_timers() []Timer {
+	mut result := []Timer{}
+	for _, timer in mgr.timers {
+		result << timer
+	}
+	return result
+}
+
+// 获取单个定时器
+pub fn (mgr TimerManager) get_timer(id string) ?Timer {
+	return mgr.timers[id]
+}
+
+// 启用/禁用定时器
+pub fn (mut mgr TimerManager) set_timer_enabled(id string, enabled bool) ! {
+	if id !in mgr.timers {
+		return error('定时器不存在')
+	}
+	mgr.timers[id].enabled = enabled
+}
+
+// 获取定时器统计
+pub fn (mgr TimerManager) get_timer_stats() map[string]int {
+	mut enabled := 0
+	mut disabled := 0
+	mut timeouts := 0
+	mut intervals := 0
+
+	for _, timer in mgr.timers {
+		if timer.enabled {
+			enabled++
+		} else {
+			disabled++
+		}
+		match timer.timer_type {
+			.timeout { timeouts++ }
+			.interval { intervals++ }
+		}
+	}
+
+	return {
+		'total_timers': mgr.timers.len
+		'enabled':      enabled
+		'disabled':     disabled
+		'timeouts':     timeouts
+		'intervals':    intervals
 	}
 }
