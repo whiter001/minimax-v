@@ -125,7 +125,20 @@ enable_desktop_control=false
 enable_screen_capture=true
 enable_logging=true
 debug=false
+smtp_server=
+smtp_port=587
+smtp_username=
+smtp_password=
+smtp_from=
 ```
+
+SMTP 全局配置用于 `send_mail` 工具。配置后，调用邮件工具时可以直接复用这些默认值，只在需要时通过工具参数覆盖。对应环境变量为：
+
+- `MINIMAX_SMTP_SERVER`
+- `MINIMAX_SMTP_PORT`
+- `MINIMAX_SMTP_USERNAME`
+- `MINIMAX_SMTP_PASSWORD`
+- `MINIMAX_SMTP_FROM`
 
 配置文件位置：
 

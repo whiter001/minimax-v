@@ -220,6 +220,32 @@ fn test_execute_tool_use_record_experience() {
 	assert jsonl.contains('工具执行经验')
 }
 
+fn test_send_mail_tool_validates_required_smtp_fields() {
+	old_config := g_config
+	defer { g_config = old_config }
+	g_config = Config{}
+
+	result := send_mail_tool('', 0, '', '', '', 'to@example.com', 'subject', 'body')
+	assert result.contains('smtp server is required')
+
+	g_config = Config{
+		smtp_server: 'smtp.example.com'
+		smtp_port:   587
+	}
+	result2 := send_mail_tool('', 0, '', '', '', 'to@example.com', 'subject', 'body')
+	assert result2.contains('smtp username is required')
+
+	g_config = Config{
+		smtp_server:   'smtp.example.com'
+		smtp_port:     587
+		smtp_username: 'user@example.com'
+		smtp_password: 'secret'
+		smtp_from:     'sender@example.com'
+	}
+	result3 := send_mail_tool('', 0, '', '', '', 'to@example.com', 'sub\rject', 'body')
+	assert result3.contains('CR/LF')
+}
+
 fn test_execute_tool_use_unknown() {
 	tool := ToolUse{
 		id:    'tu_1'

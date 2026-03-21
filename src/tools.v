@@ -1,5 +1,6 @@
 module main
 
+import net.smtp
 import os
 import strings
 import time
@@ -461,6 +462,71 @@ fn macos_accessibility_doctor_check() DoctorCheck {
 	} else {
 		DoctorCheck{'辅助功能权限', 'warn', '未授予或尚未确认'}
 	}
+}
+
+// --- Mail Tool ---
+
+fn send_mail_tool(mailserver string, mailport int, username string, password string, from string, to string, subject string, body string) string {
+	// Use config defaults when tool parameters are empty
+	final_server := if mailserver.len > 0 { mailserver } else { g_config.smtp_server }
+	final_port := if mailport > 0 { mailport } else { g_config.smtp_port }
+	final_username := if username.len > 0 { username } else { g_config.smtp_username }
+	final_password := if password.len > 0 { password } else { g_config.smtp_password }
+	final_from := if from.len > 0 {
+		from
+	} else if g_config.smtp_from.len > 0 {
+		g_config.smtp_from
+	} else {
+		final_username
+	}
+	final_to := if to.len > 0 { to } else { g_config.smtp_to }
+
+	if final_server.len == 0 {
+		return 'Error: smtp server is required (set via MINIMAX_SMTP_SERVER or tool parameter)'
+	}
+	if final_username.len == 0 {
+		return 'Error: smtp username is required (set via MINIMAX_SMTP_USERNAME or tool parameter)'
+	}
+	if final_password.len == 0 {
+		return 'Error: smtp password is required (set via MINIMAX_SMTP_PASSWORD or tool parameter)'
+	}
+	if final_from.len == 0 {
+		return 'Error: smtp from address is required (set via MINIMAX_SMTP_FROM or tool parameter)'
+	}
+	if final_to.len == 0 {
+		return 'Error: recipient (to) is required (set via MINIMAX_SMTP_TO or tool parameter)'
+	}
+	if subject.len == 0 {
+		return 'Error: subject is required'
+	}
+	if body.len == 0 {
+		return 'Error: body is required'
+	}
+	if final_from.contains('\r') || final_from.contains('\n') || final_to.contains('\r')
+		|| final_to.contains('\n') || subject.contains('\r') || subject.contains('\n') {
+		return 'Error: email headers must not contain CR/LF characters'
+	}
+	// Port 465 uses implicit SSL, port 587 uses STARTTLS
+	use_ssl := final_port == 465
+	client_cfg := smtp.Client{
+		server:   final_server
+		from:     final_from
+		port:     final_port
+		username: final_username
+		password: final_password
+		ssl:      use_ssl
+	}
+	send_cfg := smtp.Mail{
+		to:        final_to
+		subject:   subject
+		body_type: .html
+		body:      body
+	}
+	mut client := smtp.new_client(client_cfg) or {
+		return 'Error: failed to connect to mail server: ${err.msg()}'
+	}
+	client.send(send_cfg) or { return 'Error: failed to send mail: ${err.msg()}' }
+	return 'Mail sent successfully to ${final_to}'
 }
 
 fn macos_screen_recording_doctor_check() DoctorCheck {
@@ -2199,6 +2265,7 @@ fn get_available_tools() []ToolDefinition {
 		ToolDefinition{'session_note', '持久化记忆 - read/write/append 跨会话笔记'},
 		ToolDefinition{'update_working_checkpoint', '短期工作记忆 - 记录进度/约束/SOP'},
 		ToolDefinition{'todo_manager', '任务管理 - list/set/add/update/clear'},
+		ToolDefinition{'send_mail', '发送邮件 - 需 smtp 服务器和账号密码'},
 	]
 }
 
@@ -2553,7 +2620,8 @@ fn get_tools_schema_json() string {
 		'{"name":"todo_manager","description":"Manage a TODO task list to track progress on multi-step work. Actions: list (show all tasks), set (replace entire list from text, one task per line), add (add a task), update (change task status by id), clear (remove all tasks). Statuses: pending, in-progress, done.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"The action: list, set, add, update, or clear","enum":["list","set","add","update","clear"]},"title":{"type":"string","description":"Task title (for add) or full task list text (for set, one task per line)"},"id":{"type":"integer","description":"Task ID (for update)"},"status":{"type":"string","description":"New status for update: pending, in-progress, or done"}},"required":["action"]}},' +
 		'{"name":"read_many_files","description":"Read multiple files at once. Supports comma-separated file paths and glob patterns (e.g. *.v, src/*.ts). Returns the concatenated contents of all matched files. Max 20 files per call.","input_schema":{"type":"object","properties":{"paths":{"type":"string","description":"Comma-separated file paths or glob patterns (e.g. src/main.v,src/tools.v or src/*.v)"}},"required":["paths"]}},' +
 		'{"name":"activate_skill","description":"Activate a specialized skill to gain expert-level instructions for a specific domain. This loads the full skill prompt into your context. Use this when the task would benefit from specialized expertise. Call with the skill name.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"The name of the skill to activate (e.g. coder, reviewer, architect, debugger)"}},"required":["name"]}},' +
-		'{"name":"cron","description":"Manage cron scheduled tasks. Actions: create (add a cron job), create_once (add a one-time delayed job), list, show, delete, enable, disable, stats, log, run_now (execute immediately), daemon (start/stop/restart/status). When creating a job, if no daemon is running it will be auto-started.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: create, create_once, list, show, delete, enable, disable, stats, log, run_now, daemon, status"},"name":{"type":"string","description":"Job name (for create, create_once, delete, enable, disable)"},"schedule":{"type":"string","description":"Cron expression like */5 * * * * (for create)"},"delay_seconds":{"type":"integer","description":"Delay in seconds (for create_once)"},"command":{"type":"string","description":"Command to execute when job runs"},"job_id":{"type":"string","description":"Job ID (for show, delete, enable, disable, log, run_now)"},"daemon_action":{"type":"string","description":"Daemon sub-action: start, stop, restart, status (for daemon action)"}},"required":["action"]}}' +
+		'{"name":"cron","description":"Manage cron scheduled tasks. Actions: create (add a cron job), create_once (add a one-time delayed job), list, show, delete, enable, disable, stats, log, run_now (execute immediately), daemon (start/stop/restart/status). When creating a job, if no daemon is running it will be auto-started.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: create, create_once, list, show, delete, enable, disable, stats, log, run_now, daemon, status"},"name":{"type":"string","description":"Job name (for create, create_once, delete, enable, disable)"},"schedule":{"type":"string","description":"Cron expression like */5 * * * * (for create)"},"delay_seconds":{"type":"integer","description":"Delay in seconds (for create_once)"},"command":{"type":"string","description":"Command to execute when job runs"},"job_id":{"type":"string","description":"Job ID (for show, delete, enable, disable, log, run_now)"},"daemon_action":{"type":"string","description":"Daemon sub-action: start, stop, restart, status (for daemon action)"}},"required":["action"]}},' +
+		'{"name":"send_mail","description":"Send an email via SMTP. Requires smtp_server, smtp_port, smtp_username, smtp_password configured (via config file or MINIMAX_SMTP_* env vars).","input_schema":{"type":"object","properties":{"mailserver":{"type":"string","description":"SMTP server hostname (optional if configured in config)"},"mailport":{"type":"integer","description":"SMTP port number: 587 (TLS) or 465 (SSL) (optional if configured in config)"},"username":{"type":"string","description":"SMTP username (optional if configured in config)"},"password":{"type":"string","description":"SMTP password (optional if configured in config)"},"from":{"type":"string","description":"Sender email address (optional if configured in config)"},"to":{"type":"string","description":"Recipient email address (optional if smtp_to is configured)"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Email body content"}},"required":["subject","body"]}}' +
 		']'
 }
 
@@ -2732,6 +2800,18 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string) string {
 			action := tool.input['action'] or { '' }
 			return cron_tool_handler(action, tool.input)
 		}
+		'send_mail' {
+			mailserver := tool.input['mailserver'] or { '' }
+			mailport := (tool.input['mailport'] or { '0' }).int()
+			username := tool.input['username'] or { '' }
+			password := tool.input['password'] or { '' }
+			from := tool.input['from'] or { '' }
+			to := tool.input['to'] or { '' }
+			subject := tool.input['subject'] or { '' }
+			body := tool.input['body'] or { '' }
+			return send_mail_tool(mailserver, mailport, username, password, from, to,
+				subject, body)
+		}
 		else {
 			return 'Error: Unknown tool "${tool.name}"'
 		}
@@ -2780,7 +2860,7 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string)
 		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'match_sop',
 		'record_experience', 'session_note', 'task_done', 'grep_search', 'find_files',
 		'sequentialthinking', 'json_edit', 'ask_user', 'update_working_checkpoint', 'todo_manager',
-		'read_many_files', 'activate_skill', 'cron']
+		'read_many_files', 'activate_skill', 'cron', 'send_mail']
 	if tool.name in builtin_names {
 		return execute_tool_use_in_workspace(tool, workspace)
 	}

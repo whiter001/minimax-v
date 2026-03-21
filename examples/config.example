@@ -87,3 +87,23 @@ token_limit=100000
 # 未配置时默认值：balanced；可配置值：concise / balanced / strict。
 # concise：更精简；balanced：默认平衡模式；strict：更严格地同步。
 knowledge_sync_mode=balanced
+
+# === 邮件发送 (SMTP) ===
+# 用于 send_mail 工具发送邮件。配置后 AI 调用只需传 to/subject/body。
+# 未配置时默认值：空字符串。
+# 环境变量：MINIMAX_SMTP_SERVER
+# smtp_server=smtp.gmail.com
+# 未配置时默认值：587；可配置范围：1-65535。
+# 环境变量：MINIMAX_SMTP_PORT
+# smtp_port=587
+# 未配置时默认值：空字符串。
+# 环境变量：MINIMAX_SMTP_USERNAME
+# smtp_username=your-email@gmail.com
+# 未配置时默认值：空字符串。推荐使用应用专用密码而非登录密码。
+# 环境变量：MINIMAX_SMTP_PASSWORD
+# smtp_password=your-app-password
+# 未配置时默认值：空字符串（将使用 smtp_username 的值）。
+# 环境变量：MINIMAX_SMTP_FROM
+# smtp_from=your-email@gmail.com
+# 如果没传的话，默认的发送地址
+# smtp_to=

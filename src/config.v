@@ -5,12 +5,23 @@ import strconv
 
 const max_response_tokens = 204800 // 输入+输出总 token 限制 (MiniMax API)
 
+__global g_config = Config{}
+
 fn is_valid_max_rounds(rounds int) bool {
 	return rounds > 0 && rounds <= max_tool_call_rounds
 }
 
 fn is_valid_max_tokens(tokens int) bool {
 	return tokens > 0 && tokens <= max_response_tokens
+}
+
+fn parse_valid_port(value string) int {
+	if parsed := strconv.atoi(value) {
+		if parsed > 0 && parsed <= 65535 {
+			return parsed
+		}
+	}
+	return 0
 }
 
 pub struct Config {
@@ -36,7 +47,12 @@ pub mut:
 	enable_logging         bool
 	debug                  bool
 	workspace              string
-}
+	// Mail / SMTP
+	smtp_server   string
+	smtp_port     int
+	smtp_username string
+	smtp_password string
+	smtp_from     string		smtp_to       string}
 
 fn default_config() Config {
 	return Config{
@@ -61,6 +77,12 @@ fn default_config() Config {
 		enable_logging:         true
 		debug:                  false
 		workspace:              ''
+		smtp_server:            ''
+		smtp_port:              587
+		smtp_username:          ''
+		smtp_password:          ''
+		smtp_from:              ''
+		smtp_to:                ''
 	}
 }
 
@@ -210,6 +232,27 @@ fn parse_config_content(content string, base Config) Config {
 				'workspace' {
 					config.workspace = val
 				}
+				'smtp_server' {
+					config.smtp_server = val
+				}
+				'smtp_port' {
+					port := parse_valid_port(val)
+					if port > 0 {
+						config.smtp_port = port
+					}
+				}
+				'smtp_username' {
+					config.smtp_username = val
+				}
+				'smtp_password' {
+					config.smtp_password = val
+				}
+				'smtp_from' {
+					config.smtp_from = val
+				}
+				'smtp_to' {
+					config.smtp_to = val
+				}
 				'token_limit' {
 					if limit := strconv.atoi(val) {
 						if limit > 0 && limit <= 200000 {
@@ -291,6 +334,24 @@ fn apply_env_overrides(mut config Config) {
 	}
 	if val := os.getenv_opt('MINIMAX_WORKSPACE') {
 		apply_env_override(mut config, 'MINIMAX_WORKSPACE', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SMTP_SERVER') {
+		apply_env_override(mut config, 'MINIMAX_SMTP_SERVER', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SMTP_PORT') {
+		apply_env_override(mut config, 'MINIMAX_SMTP_PORT', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SMTP_USERNAME') {
+		apply_env_override(mut config, 'MINIMAX_SMTP_USERNAME', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SMTP_PASSWORD') {
+		apply_env_override(mut config, 'MINIMAX_SMTP_PASSWORD', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SMTP_FROM') {
+		apply_env_override(mut config, 'MINIMAX_SMTP_FROM', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SMTP_TO') {
+		apply_env_override(mut config, 'MINIMAX_SMTP_TO', val)
 	}
 	if config.auto_skills {
 		config.enable_tools = true
@@ -383,6 +444,27 @@ fn apply_env_override(mut config Config, key string, value string) {
 		}
 		'MINIMAX_WORKSPACE' {
 			config.workspace = value
+		}
+		'MINIMAX_SMTP_SERVER' {
+			config.smtp_server = value
+		}
+		'MINIMAX_SMTP_PORT' {
+			parsed := parse_valid_port(value)
+			if parsed > 0 {
+				config.smtp_port = parsed
+			}
+		}
+		'MINIMAX_SMTP_USERNAME' {
+			config.smtp_username = value
+		}
+		'MINIMAX_SMTP_PASSWORD' {
+			config.smtp_password = value
+		}
+		'MINIMAX_SMTP_FROM' {
+			config.smtp_from = value
+		}
+		'MINIMAX_SMTP_TO' {
+			config.smtp_to = value
 		}
 		else {}
 	}

@@ -104,6 +104,7 @@ fn main() {
 
 	mut config := load_config_file()
 	apply_env_overrides(mut config)
+	g_config = config
 
 	mut prompt := ''
 	mut is_interactive := true

@@ -120,6 +120,16 @@ fn test_parse_config_workspace() {
 	assert config.workspace == '/home/user/project'
 }
 
+fn test_parse_config_smtp_fields() {
+	content := 'smtp_server=smtp.example.com\nsmtp_port=2525\nsmtp_username=user@example.com\nsmtp_password=secret\nsmtp_from=sender@example.com'
+	config := parse_config_content(content, default_config())
+	assert config.smtp_server == 'smtp.example.com'
+	assert config.smtp_port == 2525
+	assert config.smtp_username == 'user@example.com'
+	assert config.smtp_password == 'secret'
+	assert config.smtp_from == 'sender@example.com'
+}
+
 fn test_parse_config_all_fields() {
 	content := 'api_key=sk-all\napi_url=https://custom.api\nmodel=Custom-Model\ntemperature=1.0\nmax_tokens=5000\nsystem_prompt=Be helpful\nenable_tools=true\nauto_skills=true\nauto_check_sops=false\nauto_write_skills=false\nauto_upgrade_sops=false\nknowledge_sync_mode=concise\nenable_desktop_control=true\nenable_screen_capture=true\ndebug=true\nmax_rounds=100\ntoken_limit=50000\nworkspace=/tmp'
 	config := parse_config_content(content, default_config())
@@ -251,4 +261,18 @@ fn test_apply_env_override_accepts_max_rounds_upper_bound() {
 	mut config := default_config()
 	apply_env_override(mut config, 'MINIMAX_MAX_ROUNDS', '5000')
 	assert config.max_rounds == 5000
+}
+
+fn test_apply_env_override_supports_smtp_fields() {
+	mut config := default_config()
+	apply_env_override(mut config, 'MINIMAX_SMTP_SERVER', 'smtp.example.com')
+	apply_env_override(mut config, 'MINIMAX_SMTP_PORT', '465')
+	apply_env_override(mut config, 'MINIMAX_SMTP_USERNAME', 'user@example.com')
+	apply_env_override(mut config, 'MINIMAX_SMTP_PASSWORD', 'secret')
+	apply_env_override(mut config, 'MINIMAX_SMTP_FROM', 'sender@example.com')
+	assert config.smtp_server == 'smtp.example.com'
+	assert config.smtp_port == 465
+	assert config.smtp_username == 'user@example.com'
+	assert config.smtp_password == 'secret'
+	assert config.smtp_from == 'sender@example.com'
 }
