@@ -52,7 +52,9 @@ pub mut:
 	smtp_port     int
 	smtp_username string
 	smtp_password string
-	smtp_from     string		smtp_to       string}
+	smtp_from     string
+	smtp_to       string
+}
 
 fn default_config() Config {
 	return Config{
