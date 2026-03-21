@@ -11,9 +11,16 @@ fn cron_cli_with_temp_home(prefix string, run fn ()) {
 	tmp_home := cron_cli_test_home_dir(prefix)
 	os.mkdir_all(tmp_home) or { panic(err) }
 	old_home := os.home_dir()
+	old_skip_daemon := os.getenv_opt('MINIMAX_SKIP_CRON_DAEMON_START') or { '' }
 	os.setenv('HOME', tmp_home, true)
+	os.setenv('MINIMAX_SKIP_CRON_DAEMON_START', '1', true)
 	defer {
 		os.setenv('HOME', old_home, true)
+		if old_skip_daemon.len > 0 {
+			os.setenv('MINIMAX_SKIP_CRON_DAEMON_START', old_skip_daemon, true)
+		} else {
+			os.unsetenv('MINIMAX_SKIP_CRON_DAEMON_START')
+		}
 		os.rmdir_all(tmp_home) or {}
 	}
 	run()

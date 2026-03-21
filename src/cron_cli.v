@@ -194,6 +194,10 @@ fn new_cli_cron_scheduler() !CronScheduler {
 	return new_cron_scheduler(cron_storage_path(), execute_cron_job)
 }
 
+fn should_auto_start_cron_daemon() bool {
+	return os.getenv_opt('MINIMAX_SKIP_CRON_DAEMON_START') == none
+}
+
 fn format_cron_timestamp(ts i64) string {
 	if ts <= 0 {
 		return '-'
@@ -669,7 +673,7 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			job := scheduler.add_job(name, schedule, command) or {
 				return '❌ 添加 Cron 任务失败: ${err}', 1
 			}
-			if !is_daemon_running() {
+			if should_auto_start_cron_daemon() && !is_daemon_running() {
 				start_cron_daemon() or { return '❌ 启动 Cron daemon 失败: ${err}', 1 }
 			}
 			return '✅ Cron 任务已创建\n' + build_cron_job_text(job), 0
@@ -686,7 +690,7 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			job := build_cron_delay_job(name, delay_seconds, command, mut scheduler) or {
 				return '❌ 创建一次性任务失败: ${err}', 1
 			}
-			if !is_daemon_running() {
+			if should_auto_start_cron_daemon() && !is_daemon_running() {
 				start_cron_daemon() or { return '❌ 启动 Cron daemon 失败: ${err}', 1 }
 			}
 			return '✅ 一次性 Cron 任务已创建\n' + build_cron_job_text(job), 0
@@ -832,7 +836,7 @@ fn cron_tool_handler(action string, input map[string]string) string {
 			}
 			job := scheduler.add_job(name, schedule, command) or { return 'Error: ${err}' }
 			// Auto-start daemon if not running
-			if !is_daemon_running() {
+			if should_auto_start_cron_daemon() && !is_daemon_running() {
 				start_cron_daemon() or { return 'Error: ${err}' }
 			}
 			return 'Cron job created:\n' + build_cron_job_text(job)
@@ -849,7 +853,7 @@ fn cron_tool_handler(action string, input map[string]string) string {
 				return 'Error: ${err}'
 			}
 			// Auto-start daemon if not running
-			if !is_daemon_running() {
+			if should_auto_start_cron_daemon() && !is_daemon_running() {
 				start_cron_daemon() or { return 'Error: ${err}' }
 			}
 			return 'One-time cron job created:\n' + build_cron_job_text(job)
