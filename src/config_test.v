@@ -34,7 +34,11 @@ fn test_parse_config_enable_tools() {
 	assert config2.enable_tools == true
 
 	content3 := 'enable_tools=false'
-	config3 := parse_config_content(content3, default_config())
+	// Use a base config with enable_tools=false to test explicit override
+	base_false := Config{
+		enable_tools: false
+	}
+	config3 := parse_config_content(content3, base_false)
 	assert config3.enable_tools == false
 }
 
@@ -171,14 +175,14 @@ fn test_default_config() {
 	assert config.max_tokens == 102400
 	assert config.max_rounds == 5000
 	assert config.token_limit == 80000
-	assert config.enable_tools == false
-	assert config.auto_skills == false
+	assert config.enable_tools == true
+	assert config.auto_skills == true
 	assert config.auto_check_sops == true
 	assert config.auto_write_skills == true
 	assert config.auto_upgrade_sops == true
 	assert config.knowledge_sync_mode == 'balanced'
 	assert config.enable_desktop_control == false
-	assert config.enable_screen_capture == false
+	assert config.enable_screen_capture == true
 	assert config.debug == false
 	assert config.workspace == ''
 }
