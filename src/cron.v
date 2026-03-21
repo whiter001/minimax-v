@@ -28,10 +28,11 @@ pub mut:
 
 pub struct CronScheduler {
 pub mut:
-	jobs         map[string]CronJob
-	running      bool
-	storage_path string
-	callback     ?fn (job CronJob) ! // 执行回调
+	jobs               map[string]CronJob
+	running            bool
+	storage_path       string
+	callback           ?fn (job CronJob) ! // 执行回调
+	daemon_start_mtime int                 // daemon 启动时的二进制 mtime，用于检测 rebuild
 }
 
 pub struct CronTime {
@@ -50,10 +51,11 @@ pub fn new_cron_scheduler(storage_path string, callback fn (job CronJob) !) !Cro
 	}
 
 	mut scheduler := CronScheduler{
-		jobs:         map[string]CronJob{}
-		running:      false
-		storage_path: storage_path
-		callback:     callback
+		jobs:               map[string]CronJob{}
+		running:            false
+		storage_path:       storage_path
+		callback:           callback
+		daemon_start_mtime: 0
 	}
 
 	// 加载已有任务

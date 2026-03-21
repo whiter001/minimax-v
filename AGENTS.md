@@ -14,6 +14,14 @@
 
 如果文档和实现冲突，以源码为准。
 
+## 重要外部资源
+
+- **[V 语言官网](https://vlang.io)**：语言概况、下载、新闻。
+- **[V 文档 (docs.vlang.io)](https://docs.vlang.io/)**：V 语言官方文档，包含语言教程、标准库参考等。
+- **[V 模块文档 (modules.vlang.io)](https://modules.vlang.io/)**：V 标准库和第三方模块的完整文档，可搜索/浏览。
+- **[V GitHub](https://github.com/vlang/v)**：源码、Issue、RFCs。
+- **[V Playground](https://play.vlang.io/)**：在线运行 V 代码。
+
 ## 硬性约束
 
 - 构建、测试、运行一律使用 -enable-globals。

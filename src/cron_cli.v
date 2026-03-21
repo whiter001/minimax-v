@@ -23,6 +23,10 @@ fn is_cron_cli_subcommand(args []string) bool {
 	return args.len >= 2 && args[1] == 'cron'
 }
 
+fn cron_daemon_pid_path() string {
+	return os.join_path(cron_storage_path(), 'daemon.pid')
+}
+
 fn cron_storage_path() string {
 	return os.join_path(get_minimax_config_dir(), 'cron')
 }
@@ -33,6 +37,151 @@ fn cron_logs_path() string {
 
 fn cron_job_log_path(job_id string) string {
 	return os.join_path(cron_logs_path(), '${job_id}.log')
+}
+
+// PID file format: single-line pid
+fn parse_daemon_pid(raw string) ?int {
+	trimmed := raw.trim_space()
+	if trimmed.len == 0 {
+		return none
+	}
+	for ch in trimmed {
+		if ch < `0` || ch > `9` {
+			return none
+		}
+	}
+	pid := trimmed.int()
+	if pid <= 0 {
+		return none
+	}
+	return pid
+}
+
+fn read_daemon_pid() ?int {
+	content := os.read_file(cron_daemon_pid_path()) or { return none }
+	lines := content.split('\n')
+	return parse_daemon_pid(lines[0])
+}
+
+fn write_daemon_pid_file(pid int) ! {
+	os.write_file(cron_daemon_pid_path(), '${pid}')!
+}
+
+fn current_binary_mtime() i64 {
+	cli_path := os.executable()
+	if cli_path.len == 0 {
+		return 0
+	}
+	return i64(os.file_last_mod_unix(cli_path))
+}
+
+fn spawn_cron_daemon_process(cleanup_pid_file bool) !int {
+	cli_path := os.executable()
+	if cli_path.len == 0 {
+		return error('无法获取当前可执行文件路径')
+	}
+
+	mut proc := os.new_process(cli_path)
+	proc.use_pgroup = true
+	proc.set_args(['cron', 'run'])
+	proc.set_work_folder(os.getwd())
+	proc.set_redirect_stdio()
+	proc.run()
+	if proc.pid <= 0 {
+		return error('Cron daemon 启动失败: 无法创建子进程')
+	}
+
+	for _ in 0 .. 10 {
+		if cron_daemon_process_running(proc.pid) {
+			return proc.pid
+		}
+		time.sleep(100 * time.millisecond)
+	}
+	cron_daemon_process_terminate(proc.pid) or {}
+	if cleanup_pid_file {
+		os.rm(cron_daemon_pid_path()) or {}
+	}
+	return error('Cron daemon 启动失败，进程未能保持存活')
+}
+
+fn cron_daemon_process_running(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	$if windows {
+		result := os.execute('tasklist /FI "PID eq ${pid}" /FO CSV /NH')
+		return result.exit_code == 0 && result.output.contains(',"${pid}",')
+	} $else {
+		result := os.execute('kill -0 ${pid}')
+		return result.exit_code == 0
+	}
+}
+
+fn is_daemon_running() bool {
+	if pid := read_daemon_pid() {
+		return cron_daemon_process_running(pid)
+	}
+	return false
+}
+
+fn start_cron_daemon() ! {
+	if is_daemon_running() {
+		pid := read_daemon_pid() or { 0 }
+		return error('Cron daemon 已在运行（PID: ${pid}）')
+	}
+
+	pid := spawn_cron_daemon_process(true) or { return err }
+
+	write_daemon_pid_file(pid) or {
+		cron_daemon_process_terminate(pid) or {}
+		return error('Cron daemon 启动后写入 PID 文件失败: ${err}')
+	}
+}
+
+fn cron_daemon_process_terminate(pid int) ! {
+	if pid <= 0 {
+		return error('无效的 PID')
+	}
+	$if windows {
+		result := os.execute('taskkill /PID ${pid} /T /F')
+		if result.exit_code != 0 {
+			return error('停止 Cron daemon 失败（taskkill ${pid}）：${result.output}')
+		}
+	} $else {
+		result := os.execute('kill ${pid}')
+		if result.exit_code != 0 {
+			return error('停止 Cron daemon 失败（kill ${pid}）：${result.output}')
+		}
+	}
+	return
+}
+
+fn stop_cron_daemon() ! {
+	pid := read_daemon_pid() or { return error('Cron daemon 未运行（无 PID 文件）') }
+
+	if !is_daemon_running() {
+		os.rm(cron_daemon_pid_path()) or {}
+		return error('Cron daemon 未运行（进程不存在）')
+	}
+
+	cron_daemon_process_terminate(pid)!
+
+	// Wait for process to terminate
+	for i := 0; i < 50; i++ {
+		if !is_daemon_running() {
+			os.rm(cron_daemon_pid_path()) or {}
+			return
+		}
+		time.sleep(100 * time.millisecond)
+	}
+
+	return error('停止 Cron daemon 超时，进程可能仍在运行')
+}
+
+fn restart_cron_daemon() ! {
+	// Try to stop first, ignore error if not running
+	stop_cron_daemon() or {}
+	start_cron_daemon()!
 }
 
 fn ensure_cron_storage_dirs() ! {
@@ -126,12 +275,14 @@ fn cron_help_text() string {
 		'  cron tick',
 		'  cron log <id>',
 		'  cron run',
+		'  cron daemon start|stop|restart|status',
 		'  cron timer <command> [args]',
 		'',
 		'说明:',
 		'  schedule 支持标准 5 字段 Cron，以及 @daily/@hourly/@weekly/@monthly/@yearly/@every-30m',
 		'  delay/add-once 用于一次性延迟执行，任务执行后会自动停用',
 		'  cron run 会常驻运行并每 30 秒检查一次任务',
+		'  cron daemon 管理后台常驻进程（创建任务时如未运行会自动启动）',
 		'  cron timer 提供类似 JS setTimeout/setInterval 的可取消定时器',
 		'  任务持久化目录: ${cron_storage_path()}',
 		'',
@@ -140,6 +291,8 @@ fn cron_help_text() string {
 		'  minimax_cli cron delay 60 x-once /Users/byf/bl/github/minimax-v/minimax_cli --mcp -p "1分钟后打开 x.com，获取最新动态并用中文总结"',
 		'  minimax_cli cron list',
 		'  minimax_cli cron run',
+		'  minimax_cli cron daemon status',
+		'  minimax_cli cron daemon stop',
 	].join('\n')
 }
 
@@ -516,6 +669,9 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			job := scheduler.add_job(name, schedule, command) or {
 				return '❌ 添加 Cron 任务失败: ${err}', 1
 			}
+			if !is_daemon_running() {
+				start_cron_daemon() or { return '❌ 启动 Cron daemon 失败: ${err}', 1 }
+			}
 			return '✅ Cron 任务已创建\n' + build_cron_job_text(job), 0
 		}
 		'delay', 'add-once' {
@@ -529,6 +685,9 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			command := args[3..].join(' ')
 			job := build_cron_delay_job(name, delay_seconds, command, mut scheduler) or {
 				return '❌ 创建一次性任务失败: ${err}', 1
+			}
+			if !is_daemon_running() {
+				start_cron_daemon() or { return '❌ 启动 Cron daemon 失败: ${err}', 1 }
 			}
 			return '✅ 一次性 Cron 任务已创建\n' + build_cron_job_text(job), 0
 		}
@@ -584,18 +743,224 @@ fn execute_cron_cli_command(args []string) (string, int) {
 		}
 		'run' {
 			scheduler.start()
+			// Write PID file for daemon management
+			write_daemon_pid_file(os.getpid()) or {
+				eprintln('Warning: 无法写入 PID 文件: ${err}')
+			}
+			// Record binary mtime at daemon start for rebuild detection
+			scheduler.daemon_start_mtime = int(current_binary_mtime())
 			println('Cron runner 已启动，存储目录: ${cron_storage_path()}，检查间隔: ${cron_runner_tick_interval_seconds}s')
 			for {
+				// Detect binary rebuild: if mtime changed, self-restart
+				if scheduler.daemon_start_mtime > 0
+					&& current_binary_mtime() > scheduler.daemon_start_mtime {
+					eprintln('检测到新版本，构建已更新，自动重启 daemon...')
+					new_pid := spawn_cron_daemon_process(false) or {
+						eprintln('自动重启失败: ${err}')
+						scheduler.daemon_start_mtime = int(current_binary_mtime())
+						continue
+					}
+					write_daemon_pid_file(new_pid) or {
+						eprintln('自动重启失败: ${err}')
+						cron_daemon_process_terminate(new_pid) or {}
+						scheduler.daemon_start_mtime = int(current_binary_mtime())
+						continue
+					}
+					return '', 0
+				}
 				scheduler.tick() or { eprintln('Cron tick 失败: ${err}') }
 				time.sleep(cron_runner_tick_interval_seconds * time.second)
 			}
 			return '', 0
+		}
+		'daemon' {
+			// Daemon management: start | stop | restart | status
+			if args.len < 2 {
+				return '用法: cron daemon start|stop|restart|status', 2
+			}
+			match args[1] {
+				'start' {
+					start_cron_daemon() or { return '❌ 启动 daemon 失败: ${err}', 1 }
+					return '✅ Cron daemon 已启动', 0
+				}
+				'stop' {
+					stop_cron_daemon() or { return '❌ 停止 daemon 失败: ${err}', 1 }
+					return '✅ Cron daemon 已停止', 0
+				}
+				'restart' {
+					restart_cron_daemon() or { return '❌ 重启 daemon 失败: ${err}', 1 }
+					return '✅ Cron daemon 已重启', 0
+				}
+				'status' {
+					if is_daemon_running() {
+						pid := read_daemon_pid() or { 0 }
+						return '✅ Cron daemon 运行中（PID: ${pid}）', 0
+					} else {
+						return '🔴 Cron daemon 未运行', 0
+					}
+				}
+				else {
+					return '未知 daemon 命令: ${args[1]}（start|stop|restart|status）', 2
+				}
+			}
+		}
+		'start-daemon' {
+			// Alias for daemon start
+			start_cron_daemon() or { return '❌ 启动 daemon 失败: ${err}', 1 }
+			return '✅ Cron daemon 已启动', 0
 		}
 		'timer' {
 			return execute_timer_command(args[1..], mut g_timer_manager)
 		}
 		else {
 			return '未知 cron 命令: ${args[0]}\n\n' + cron_help_text(), 2
+		}
+	}
+}
+
+// cron_tool_handler - AI tool interface for cron operations
+fn cron_tool_handler(action string, input map[string]string) string {
+	mut scheduler := new_cli_cron_scheduler() or { return 'Error: ${err}' }
+
+	match action {
+		'create' {
+			name := input['name'] or { '' }
+			schedule := input['schedule'] or { '' }
+			command := input['command'] or { '' }
+			if name.len == 0 || schedule.len == 0 || command.len == 0 {
+				return 'Error: name, schedule, and command are required for create'
+			}
+			job := scheduler.add_job(name, schedule, command) or { return 'Error: ${err}' }
+			// Auto-start daemon if not running
+			if !is_daemon_running() {
+				start_cron_daemon() or { return 'Error: ${err}' }
+			}
+			return 'Cron job created:\n' + build_cron_job_text(job)
+		}
+		'create_once' {
+			name := input['name'] or { '' }
+			delay_str := input['delay_seconds'] or { '0' }
+			command := input['command'] or { '' }
+			delay_seconds := delay_str.int()
+			if name.len == 0 || delay_seconds <= 0 || command.len == 0 {
+				return 'Error: name, delay_seconds (>0), and command are required for create_once'
+			}
+			job := build_cron_delay_job(name, delay_seconds, command, mut scheduler) or {
+				return 'Error: ${err}'
+			}
+			// Auto-start daemon if not running
+			if !is_daemon_running() {
+				start_cron_daemon() or { return 'Error: ${err}' }
+			}
+			return 'One-time cron job created:\n' + build_cron_job_text(job)
+		}
+		'list' {
+			return build_cron_jobs_text(scheduler.list_jobs())
+		}
+		'show' {
+			job_id := input['job_id'] or { '' }
+			if job_id.len == 0 {
+				return 'Error: job_id is required for show'
+			}
+			job := scheduler.get_job(job_id) or { return 'Error: Job not found' }
+			return build_cron_job_text(job)
+		}
+		'delete' {
+			job_id := input['job_id'] or { '' }
+			if job_id.len == 0 {
+				return 'Error: job_id is required for delete'
+			}
+			scheduler.delete_job(job_id) or { return 'Error: ${err}' }
+			return 'Cron job deleted: ${job_id}'
+		}
+		'enable' {
+			job_id := input['job_id'] or { '' }
+			if job_id.len == 0 {
+				return 'Error: job_id is required for enable'
+			}
+			scheduler.set_job_enabled(job_id, true) or { return 'Error: ${err}' }
+			return 'Cron job enabled: ${job_id}'
+		}
+		'disable' {
+			job_id := input['job_id'] or { '' }
+			if job_id.len == 0 {
+				return 'Error: job_id is required for disable'
+			}
+			scheduler.set_job_enabled(job_id, false) or { return 'Error: ${err}' }
+			return 'Cron job disabled: ${job_id}'
+		}
+		'stats' {
+			return build_cron_stats_text(scheduler.get_stats())
+		}
+		'log' {
+			job_id := input['job_id'] or { '' }
+			if job_id.len == 0 {
+				return 'Error: job_id is required for log'
+			}
+			content := os.read_file(cron_job_log_path(job_id)) or {
+				return 'Error: Log not found for job ${job_id}'
+			}
+			return content
+		}
+		'run_now' {
+			job_id := input['job_id'] or { '' }
+			if job_id.len == 0 {
+				return 'Error: job_id is required for run_now'
+			}
+			mut job := scheduler.get_job(job_id) or { return 'Error: Job not found' }
+			execute_cron_job(job) or { return 'Error: ${err}' }
+			now := time.now().unix()
+			job.last_run = now
+			job.execution_count++
+			if job.run_once {
+				job.enabled = false
+				job.next_run = 0
+			} else {
+				job.next_run = calculate_next_run(job.schedule)
+			}
+			scheduler.jobs[job_id] = job
+			scheduler.save() or { return 'Error: ${err}' }
+			return 'Cron job executed: ${job_id}'
+		}
+		'daemon' {
+			daemon_action := input['daemon_action'] or { '' }
+			match daemon_action {
+				'start' {
+					start_cron_daemon() or { return 'Error: ${err}' }
+					return 'Cron daemon started'
+				}
+				'stop' {
+					stop_cron_daemon() or { return 'Error: ${err}' }
+					return 'Cron daemon stopped'
+				}
+				'restart' {
+					restart_cron_daemon() or { return 'Error: ${err}' }
+					return 'Cron daemon restarted'
+				}
+				'status' {
+					if is_daemon_running() {
+						pid := read_daemon_pid() or { 0 }
+						return 'Cron daemon running (PID: ${pid})'
+					} else {
+						return 'Cron daemon not running'
+					}
+				}
+				else {
+					return 'Error: daemon_action must be start|stop|restart|status'
+				}
+			}
+		}
+		'status' {
+			// Alias for daemon status
+			if is_daemon_running() {
+				pid := read_daemon_pid() or { 0 }
+				return 'Cron daemon running (PID: ${pid})'
+			} else {
+				return 'Cron daemon not running'
+			}
+		}
+		else {
+			return 'Error: Unknown action "${action}". Use: create, create_once, list, show, delete, enable, disable, stats, log, run_now, daemon, status'
 		}
 	}
 }

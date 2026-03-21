@@ -2552,7 +2552,8 @@ fn get_tools_schema_json() string {
 		'{"name":"update_working_checkpoint","description":"Maintain short-term working memory for long tasks. Store key constraints, progress, pitfalls, and related SOP names for later rounds.","input_schema":{"type":"object","properties":{"key_info":{"type":"string","description":"Compact working notes: requirements, progress, pitfalls, and next step."},"related_sop":{"type":"string","description":"Related SOP names or paths."}},"required":[]}},' +
 		'{"name":"todo_manager","description":"Manage a TODO task list to track progress on multi-step work. Actions: list (show all tasks), set (replace entire list from text, one task per line), add (add a task), update (change task status by id), clear (remove all tasks). Statuses: pending, in-progress, done.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"The action: list, set, add, update, or clear","enum":["list","set","add","update","clear"]},"title":{"type":"string","description":"Task title (for add) or full task list text (for set, one task per line)"},"id":{"type":"integer","description":"Task ID (for update)"},"status":{"type":"string","description":"New status for update: pending, in-progress, or done"}},"required":["action"]}},' +
 		'{"name":"read_many_files","description":"Read multiple files at once. Supports comma-separated file paths and glob patterns (e.g. *.v, src/*.ts). Returns the concatenated contents of all matched files. Max 20 files per call.","input_schema":{"type":"object","properties":{"paths":{"type":"string","description":"Comma-separated file paths or glob patterns (e.g. src/main.v,src/tools.v or src/*.v)"}},"required":["paths"]}},' +
-		'{"name":"activate_skill","description":"Activate a specialized skill to gain expert-level instructions for a specific domain. This loads the full skill prompt into your context. Use this when the task would benefit from specialized expertise. Call with the skill name.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"The name of the skill to activate (e.g. coder, reviewer, architect, debugger)"}},"required":["name"]}}' +
+		'{"name":"activate_skill","description":"Activate a specialized skill to gain expert-level instructions for a specific domain. This loads the full skill prompt into your context. Use this when the task would benefit from specialized expertise. Call with the skill name.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"The name of the skill to activate (e.g. coder, reviewer, architect, debugger)"}},"required":["name"]}},' +
+		'{"name":"cron","description":"Manage cron scheduled tasks. Actions: create (add a cron job), create_once (add a one-time delayed job), list, show, delete, enable, disable, stats, log, run_now (execute immediately), daemon (start/stop/restart/status). When creating a job, if no daemon is running it will be auto-started.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: create, create_once, list, show, delete, enable, disable, stats, log, run_now, daemon, status"},"name":{"type":"string","description":"Job name (for create, create_once, delete, enable, disable)"},"schedule":{"type":"string","description":"Cron expression like */5 * * * * (for create)"},"delay_seconds":{"type":"integer","description":"Delay in seconds (for create_once)"},"command":{"type":"string","description":"Command to execute when job runs"},"job_id":{"type":"string","description":"Job ID (for show, delete, enable, disable, log, run_now)"},"daemon_action":{"type":"string","description":"Daemon sub-action: start, stop, restart, status (for daemon action)"}},"required":["action"]}}' +
 		']'
 }
 
@@ -2727,6 +2728,10 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string) string {
 			name := tool.input['name'] or { '' }
 			return activate_skill_tool(name)
 		}
+		'cron' {
+			action := tool.input['action'] or { '' }
+			return cron_tool_handler(action, tool.input)
+		}
 		else {
 			return 'Error: Unknown tool "${tool.name}"'
 		}
@@ -2775,7 +2780,7 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string)
 		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'match_sop',
 		'record_experience', 'session_note', 'task_done', 'grep_search', 'find_files',
 		'sequentialthinking', 'json_edit', 'ask_user', 'update_working_checkpoint', 'todo_manager',
-		'read_many_files', 'activate_skill']
+		'read_many_files', 'activate_skill', 'cron']
 	if tool.name in builtin_names {
 		return execute_tool_use_in_workspace(tool, workspace)
 	}
