@@ -5,8 +5,6 @@ import strconv
 
 const max_response_tokens = 204800 // 输入+输出总 token 限制 (MiniMax API)
 
-__global g_config = Config{}
-
 fn is_valid_max_rounds(rounds int) bool {
 	return rounds > 0 && rounds <= max_tool_call_rounds
 }

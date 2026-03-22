@@ -6,22 +6,13 @@ import strconv
 
 const version = 'v0.9.0'
 
-__global g_mcp_manager = &McpManager(unsafe { nil })
-__global g_shutting_down = false
-__global g_acp_mode = false
-
 fn sigint_handler(_ os.Signal) {
 	// Prevent re-entrant signal handling which causes segfault
-	if g_shutting_down {
+	if runtime_mark_shutting_down() {
 		exit(130)
 	}
-	g_shutting_down = true
-	if g_mcp_manager != unsafe { nil } {
-		unsafe {
-			g_mcp_manager.stop_all()
-		}
-	}
-	if !g_acp_mode {
+	runtime_stop_all_mcp()
+	if !runtime_is_acp_mode() {
 		println('\n👋 已中断')
 	}
 	exit(130)
@@ -104,7 +95,6 @@ fn main() {
 
 	mut config := load_config_file()
 	apply_env_overrides(mut config)
-	g_config = config
 
 	mut prompt := ''
 	mut is_interactive := true
@@ -270,7 +260,7 @@ fn main() {
 	show_skills = runtime_flags.show_skills
 
 	if acp_mode {
-		g_acp_mode = true
+		runtime_set_acp_mode(true)
 		set_tool_capabilities(client.enable_desktop_control, client.enable_screen_capture)
 		run_acp_server(client) or {
 			eprintln('ACP server error: ${err}')
@@ -320,7 +310,7 @@ fn main() {
 	client.logger.log_session_end()
 
 	// Cleanup MCP (always safe to call, even if only builtin was registered)
-	client.mcp_manager.stop_all()
+	runtime_stop_all_mcp()
 
 	if exit_code != 0 {
 		exit(exit_code)
@@ -428,12 +418,11 @@ fn print_quota(client ApiClient) {
 
 // init_mcp_builtin always registers the built-in MiniMax MCP (lazy start).
 fn init_mcp_builtin(mut client ApiClient) {
-	if g_mcp_manager == unsafe { nil } {
-		g_mcp_manager = &client.mcp_manager
-	}
 	if client.mcp_manager.servers.len == 0 {
 		client.mcp_manager = new_mcp_manager()
-		g_mcp_manager = &client.mcp_manager
+		runtime_set_mcp_manager(&client.mcp_manager)
+	} else {
+		runtime_set_mcp_manager(&client.mcp_manager)
 	}
 	if manager_has_server_named(client.mcp_manager, 'MiniMax') {
 		client.enable_tools = true

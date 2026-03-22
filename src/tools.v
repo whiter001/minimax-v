@@ -466,20 +466,20 @@ fn macos_accessibility_doctor_check() DoctorCheck {
 
 // --- Mail Tool ---
 
-fn send_mail_tool(mailserver string, mailport int, username string, password string, from string, to string, subject string, body string) string {
+fn send_mail_tool(config Config, mailserver string, mailport int, username string, password string, from string, to string, subject string, body string) string {
 	// Use config defaults when tool parameters are empty
-	final_server := if mailserver.len > 0 { mailserver } else { g_config.smtp_server }
-	final_port := if mailport > 0 { mailport } else { g_config.smtp_port }
-	final_username := if username.len > 0 { username } else { g_config.smtp_username }
-	final_password := if password.len > 0 { password } else { g_config.smtp_password }
+	final_server := if mailserver.len > 0 { mailserver } else { config.smtp_server }
+	final_port := if mailport > 0 { mailport } else { config.smtp_port }
+	final_username := if username.len > 0 { username } else { config.smtp_username }
+	final_password := if password.len > 0 { password } else { config.smtp_password }
 	final_from := if from.len > 0 {
 		from
-	} else if g_config.smtp_from.len > 0 {
-		g_config.smtp_from
+	} else if config.smtp_from.len > 0 {
+		config.smtp_from
 	} else {
 		final_username
 	}
-	final_to := if to.len > 0 { to } else { g_config.smtp_to }
+	final_to := if to.len > 0 { to } else { config.smtp_to }
 
 	if final_server.len == 0 {
 		return 'Error: smtp server is required (set via MINIMAX_SMTP_SERVER or tool parameter)'
@@ -2333,7 +2333,7 @@ fn sequentialthinking_tool(thought string, thought_number int, total_thoughts in
 		prefix = '💭 Thought'
 	}
 	status := if next_thought_needed { 'continuing...' } else { 'complete ✅' }
-	if !g_acp_mode {
+	if !runtime_is_acp_mode() {
 		println('\x1b[92m  ${prefix} ${thought_number}/${total_thoughts}: ${thought}\x1b[0m')
 		println('\x1b[92m  [${status}]\x1b[0m')
 	}
@@ -2488,7 +2488,7 @@ fn ask_user_tool(question string) string {
 	if question.len == 0 {
 		return 'Error: question is required'
 	}
-	if g_acp_mode {
+	if runtime_is_acp_mode() {
 		return 'Error: ask_user is unavailable in ACP mode'
 	}
 	if term_ui_is_active() {
@@ -2626,10 +2626,10 @@ fn get_tools_schema_json() string {
 }
 
 fn execute_tool_use(tool ToolUse) string {
-	return execute_tool_use_in_workspace(tool, '')
+	return execute_tool_use_in_workspace(tool, '', default_config())
 }
 
-fn execute_tool_use_in_workspace(tool ToolUse, workspace string) string {
+fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) string {
 	match tool.name {
 		'str_replace_editor' {
 			cmd := tool.input['command'] or { '' }
@@ -2809,8 +2809,8 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string) string {
 			to := tool.input['to'] or { '' }
 			subject := tool.input['subject'] or { '' }
 			body := tool.input['body'] or { '' }
-			return send_mail_tool(mailserver, mailport, username, password, from, to,
-				subject, body)
+			return send_mail_tool(config, mailserver, mailport, username, password, from,
+				to, subject, body)
 		}
 		else {
 			return 'Error: Unknown tool "${tool.name}"'
@@ -2818,15 +2818,15 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string) string {
 	}
 }
 
-fn print_tool_result(name string, result string) {
-	if g_acp_mode {
+fn print_tool_result(mut client ApiClient, name string, result string) {
+	if runtime_is_acp_mode() {
 		return
 	}
 	if term_ui_is_active() {
 		term_ui_add_tool_result(name, result)
 		return
 	}
-	clear_phase_status_line()
+	client.clear_phase_status_line()
 	display_len := if result.len > 120 { 120 } else { result.len }
 	display := result[..display_len].replace('\n', ' ').replace('\t', ' ')
 	suffix := if result.len > 120 { '...' } else { '' }
@@ -2850,7 +2850,7 @@ fn build_mcp_args_json(input map[string]string) string {
 	return args_json
 }
 
-fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string) string {
+fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string, config Config) string {
 	if tool.name == 'screen_analyze' {
 		return screen_analyze_tool_with_mcp(mut mcp, tool.input, workspace)
 	}
@@ -2862,7 +2862,7 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string)
 		'sequentialthinking', 'json_edit', 'ask_user', 'update_working_checkpoint', 'todo_manager',
 		'read_many_files', 'activate_skill', 'cron', 'send_mail']
 	if tool.name in builtin_names {
-		return execute_tool_use_in_workspace(tool, workspace)
+		return execute_tool_use_in_workspace(tool, workspace, config)
 	}
 
 	// Try MCP tools

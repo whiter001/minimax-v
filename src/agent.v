@@ -95,8 +95,8 @@ fn step_state_name(state AgentStepState) string {
 	}
 }
 
-fn print_step_status(step AgentStep) {
-	if g_acp_mode {
+fn print_step_status(mut c ApiClient, step AgentStep) {
+	if runtime_is_acp_mode() {
 		return
 	}
 	if term_ui_is_active() {
@@ -112,7 +112,7 @@ fn print_step_status(step AgentStep) {
 		term_ui_add_activity(summary)
 		return
 	}
-	clear_phase_status_line()
+	c.clear_phase_status_line()
 	emoji := step_state_emoji(step.state)
 	color := step_state_color(step.state)
 	name := step_state_name(step.state)

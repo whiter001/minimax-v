@@ -166,7 +166,7 @@ fn test_execute_tool_use_read_file() {
 			'path': test_path
 		}
 	}
-	result := execute_tool_use_in_workspace(tool, '')
+	result := execute_tool_use_in_workspace(tool, '', default_config())
 	assert result == 'exec test'
 }
 
@@ -183,7 +183,7 @@ fn test_execute_tool_use_with_workspace() {
 			'path': 'hello.txt'
 		}
 	}
-	result := execute_tool_use_in_workspace(tool, test_dir)
+	result := execute_tool_use_in_workspace(tool, test_dir, default_config())
 	assert result == 'workspace file'
 }
 
@@ -209,7 +209,7 @@ fn test_execute_tool_use_record_experience() {
 			'confidence': '5'
 		}
 	}
-	result := execute_tool_use_in_workspace(tool, '')
+	result := execute_tool_use_in_workspace(tool, '', default_config())
 	assert result.contains('已记录经验')
 	assert result.contains('已同步 skill')
 	assert result.contains('已升级 SOP')
@@ -221,28 +221,27 @@ fn test_execute_tool_use_record_experience() {
 }
 
 fn test_send_mail_tool_validates_required_smtp_fields() {
-	old_config := g_config
-	defer { g_config = old_config }
-	g_config = Config{}
-
-	result := send_mail_tool('', 0, '', '', '', 'to@example.com', 'subject', 'body')
+	result := send_mail_tool(Config{}, '', 0, '', '', '', 'to@example.com', 'subject',
+		'body')
 	assert result.contains('smtp server is required')
 
-	g_config = Config{
+	config := Config{
 		smtp_server: 'smtp.example.com'
 		smtp_port:   587
 	}
-	result2 := send_mail_tool('', 0, '', '', '', 'to@example.com', 'subject', 'body')
+	result2 := send_mail_tool(config, '', 0, '', '', '', 'to@example.com', 'subject',
+		'body')
 	assert result2.contains('smtp username is required')
 
-	g_config = Config{
+	config2 := Config{
 		smtp_server:   'smtp.example.com'
 		smtp_port:     587
 		smtp_username: 'user@example.com'
 		smtp_password: 'secret'
 		smtp_from:     'sender@example.com'
 	}
-	result3 := send_mail_tool('', 0, '', '', '', 'to@example.com', 'sub\rject', 'body')
+	result3 := send_mail_tool(config2, '', 0, '', '', '', 'to@example.com', 'sub\rject',
+		'body')
 	assert result3.contains('CR/LF')
 }
 
@@ -260,11 +259,13 @@ fn test_execute_tool_use_unknown() {
 // Just verify no crash on various inputs
 
 fn test_print_tool_result_short() {
-	print_tool_result('test', 'short result')
+	mut client := new_api_client(default_config())
+	print_tool_result(mut client, 'test', 'short result')
 }
 
 fn test_print_tool_result_long() {
-	print_tool_result('test', 'x'.repeat(200))
+	mut client := new_api_client(default_config())
+	print_tool_result(mut client, 'test', 'x'.repeat(200))
 }
 
 // ===== grep_search_tool =====

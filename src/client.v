@@ -34,9 +34,6 @@ Rules:
 7. Keep the rewrite concise.
 8. Return ONLY the rewritten prompt text, no explanations."
 
-__global g_phase_status_visible = u64(0)
-__global g_phase_status_generation = u64(0)
-
 @[heap]
 struct StreamState {
 mut:
@@ -244,60 +241,62 @@ pub mut:
 
 pub struct ApiClient {
 pub mut:
-	api_key                string
-	api_url                string
-	messages               []ChatMessage
-	model                  string
-	temperature            f64
-	max_tokens             i32
-	max_rounds             int
-	token_limit            int
-	system_prompt          string
-	use_streaming          bool
-	enable_tools           bool
-	auto_skills            bool
-	auto_check_sops        bool
-	auto_refine            bool
-	auto_confirm_refine    bool
-	enable_desktop_control bool
-	enable_screen_capture  bool
-	debug                  bool
-	workspace              string
-	logger                 Logger
-	mcp_manager            McpManager
-	trajectory             TrajectoryRecorder
-	plan_mode              bool // Plan mode: draft plan first, execute after user approval
-	silent_mode            bool // suppress console output (used by ACP mode)
-	interactive_mode       bool // true only in REPL mode where ask_user can safely block for input
+	api_key                 string
+	api_url                 string
+	config                  Config
+	messages                []ChatMessage
+	model                   string
+	temperature             f64
+	max_tokens              i32
+	max_rounds              int
+	token_limit             int
+	system_prompt           string
+	use_streaming           bool
+	enable_tools            bool
+	auto_skills             bool
+	auto_check_sops         bool
+	auto_refine             bool
+	auto_confirm_refine     bool
+	enable_desktop_control  bool
+	enable_screen_capture   bool
+	debug                   bool
+	workspace               string
+	logger                  Logger
+	mcp_manager             McpManager
+	trajectory              TrajectoryRecorder
+	phase_status_generation u64
+	plan_mode               bool // Plan mode: draft plan first, execute after user approval
+	silent_mode             bool // suppress console output (used by ACP mode)
+	interactive_mode        bool // true only in REPL mode where ask_user can safely block for input
 }
 
 fn new_api_client(config Config) ApiClient {
-	// Initialize global bash session with workspace
-	bash_session = new_bash_session(config.workspace)
 	return ApiClient{
-		api_key:                config.api_key
-		api_url:                config.api_url
-		messages:               []ChatMessage{}
-		model:                  config.model
-		temperature:            config.temperature
-		max_tokens:             config.max_tokens
-		max_rounds:             config.max_rounds
-		token_limit:            config.token_limit
-		system_prompt:          config.system_prompt
-		use_streaming:          false
-		enable_tools:           config.enable_tools
-		auto_skills:            config.auto_skills
-		auto_check_sops:        config.auto_check_sops
-		auto_refine:            config.auto_refine
-		auto_confirm_refine:    config.auto_confirm_refine
-		enable_desktop_control: config.enable_desktop_control
-		enable_screen_capture:  config.enable_screen_capture
-		debug:                  config.debug
-		workspace:              config.workspace
-		logger:                 new_logger(config.enable_logging)
-		trajectory:             new_trajectory_recorder(false)
-		silent_mode:            false
-		interactive_mode:       false
+		api_key:                 config.api_key
+		api_url:                 config.api_url
+		config:                  config
+		messages:                []ChatMessage{}
+		model:                   config.model
+		temperature:             config.temperature
+		max_tokens:              config.max_tokens
+		max_rounds:              config.max_rounds
+		token_limit:             config.token_limit
+		system_prompt:           config.system_prompt
+		use_streaming:           false
+		enable_tools:            config.enable_tools
+		auto_skills:             config.auto_skills
+		auto_check_sops:         config.auto_check_sops
+		auto_refine:             config.auto_refine
+		auto_confirm_refine:     config.auto_confirm_refine
+		enable_desktop_control:  config.enable_desktop_control
+		enable_screen_capture:   config.enable_screen_capture
+		debug:                   config.debug
+		workspace:               config.workspace
+		logger:                  new_logger(config.enable_logging)
+		trajectory:              new_trajectory_recorder(false)
+		phase_status_generation: 0
+		silent_mode:             false
+		interactive_mode:        false
 	}
 }
 
@@ -835,14 +834,13 @@ fn render_phase_status_line(message string, detail string, elapsed_seconds int) 
 	}
 	line += ' (${elapsed_seconds}s)\x1b[0m'
 	print('\r\x1b[2K${line}')
-	stdatomic.store_u64(&g_phase_status_visible, 1)
 }
 
-fn phase_status_timer_loop(generation u64, message string, detail string) {
+fn phase_status_timer_loop(c &ApiClient, generation u64, message string, detail string) {
 	mut elapsed_seconds := 0
 	for {
 		time.sleep(1 * time.second)
-		if stdatomic.load_u64(&g_phase_status_generation) != generation {
+		if stdatomic.load_u64(&c.phase_status_generation) != generation {
 			return
 		}
 		elapsed_seconds++
@@ -850,30 +848,26 @@ fn phase_status_timer_loop(generation u64, message string, detail string) {
 	}
 }
 
-fn clear_phase_status_line() {
+fn (mut c ApiClient) clear_phase_status_line() {
+	stdatomic.add_u64(&c.phase_status_generation, 1)
 	if term_ui_is_active() {
 		term_ui_clear_status()
 		return
 	}
-	stdatomic.add_u64(&g_phase_status_generation, 1)
-	if stdatomic.load_u64(&g_phase_status_visible) == 0 {
-		return
-	}
 	print('\r\x1b[2K')
-	stdatomic.store_u64(&g_phase_status_visible, 0)
 }
 
 fn (c ApiClient) should_show_phase_status() bool {
-	return c.interactive_mode && !c.silent_mode && !g_acp_mode
+	return c.interactive_mode && !c.silent_mode && !runtime_is_acp_mode()
 }
 
 fn (c ApiClient) print_phase_status(message string, detail string) {
 	if !c.should_show_phase_status() {
 		return
 	}
-	generation := stdatomic.add_u64(&g_phase_status_generation, 1)
+	generation := stdatomic.add_u64(&c.phase_status_generation, 1)
 	render_phase_status_line(message, detail, 0)
-	go phase_status_timer_loop(generation, message, detail)
+	go phase_status_timer_loop(c, generation, message, detail)
 }
 
 fn tool_phase_message(tool ToolUse) string {
@@ -955,7 +949,7 @@ fn (mut c ApiClient) log_parsed_thinking_if_needed(parsed ParsedResponse) {
 		if term_ui_is_active() {
 			term_ui_append_thinking(parsed.thinking)
 		} else if !c.silent_mode {
-			clear_phase_status_line()
+			c.clear_phase_status_line()
 			println('\x1b[92m🧠 Thinking: ${parsed.thinking}\x1b[0m')
 		}
 		c.logger.log('INFO', 'THINKING', parsed.thinking.replace('\n', '\\n'))
@@ -1005,7 +999,7 @@ fn (mut c ApiClient) block_repeated_failed_tool_batch(mut step AgentStep, mut ex
 	step.tool_calls = tools
 	step.tool_results = [message]
 	step.end_time = time.now().unix_milli()
-	print_step_status(step)
+	print_step_status(mut c, step)
 	c.trajectory.record_step(step)
 	execution.steps << step
 	c.messages << ChatMessage{
@@ -1042,7 +1036,8 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 			raw_result = 'Error: 检测到相同的 bash 失败命令已连续重复，已阻止再次执行。请先修改命令、检查路径或权限，或改用其他工具。'
 			c.logger.log('WARN', 'TOOL_GUARD', 'blocked repeated failed bash command')
 		} else {
-			raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, tu, c.workspace)
+			raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, tu, c.workspace,
+				c.config)
 		}
 		c.logger.log_phase_end('tool.execute', time.now().unix_milli() - tool_start_ms,
 			'step=${step.step_number} round=${tool_round} name=${tu.name} ${tool_detail}')
@@ -1062,11 +1057,11 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 		}
 		if raw_result.starts_with('__TASK_DONE__:') {
 			task_done_result = raw_result[14..]
-			print_tool_result(tu.name, task_done_result)
+			print_tool_result(mut c, tu.name, task_done_result)
 			tool_results << task_done_result
 			tool_names << tu.name
 		} else {
-			print_tool_result(tu.name, raw_result)
+			print_tool_result(mut c, tu.name, raw_result)
 			tool_results << raw_result
 			tool_names << tu.name
 		}
@@ -1110,7 +1105,7 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 fn (mut c ApiClient) complete_task_done(mut step AgentStep, mut execution AgentExecution, task_done_result string, total_retries int) string {
 	step.state = .completed
 	step.end_time = time.now().unix_milli()
-	print_step_status(step)
+	print_step_status(mut c, step)
 	c.trajectory.record_step(step)
 	execution.steps << step
 	execution.final_result = task_done_result
@@ -1148,7 +1143,7 @@ fn (mut c ApiClient) complete_task_done(mut step AgentStep, mut execution AgentE
 	return task_done_result
 }
 
-fn (c ApiClient) send_api_request(body_json string) !string {
+fn (mut c ApiClient) send_api_request(body_json string) !string {
 	start_ms := time.now().unix_milli()
 	request_mode := 'sync'
 	c.logger.log_phase_start('api.request', 'mode=${request_mode} bytes=${body_json.len}')
@@ -1173,30 +1168,30 @@ fn (c ApiClient) send_api_request(body_json string) !string {
 
 	response := req.do() or {
 		c.logger.log_error('API', 'phase=api.request mode=${request_mode} duration_ms=${time.now().unix_milli() - start_ms} err=${err}')
-		clear_phase_status_line()
+		c.clear_phase_status_line()
 		return err
 	}
 
 	if response.status_code != 200 {
 		c.logger.log_error('API', 'phase=api.request mode=${request_mode} duration_ms=${time.now().unix_milli() - start_ms} status=${response.status_code}')
-		clear_phase_status_line()
+		c.clear_phase_status_line()
 		return error('API Error ${response.status_code}: ${response.body}')
 	}
 	c.logger.log_phase_end('api.request', time.now().unix_milli() - start_ms, 'mode=${request_mode} bytes=${body_json.len} status=${response.status_code} body_bytes=${response.body.len}')
-	clear_phase_status_line()
+	c.clear_phase_status_line()
 
 	return response.body
 }
 
-fn (c ApiClient) send_streaming_request(body_json string) !StreamResult {
+fn (mut c ApiClient) send_streaming_request(body_json string) !StreamResult {
 	return c.send_streaming_request_opt(body_json, true)
 }
 
-fn (c ApiClient) send_streaming_request_silent(body_json string) !StreamResult {
+fn (mut c ApiClient) send_streaming_request_silent(body_json string) !StreamResult {
 	return c.send_streaming_request_opt(body_json, false)
 }
 
-fn (c ApiClient) send_streaming_request_opt(body_json string, show_output bool) !StreamResult {
+fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bool) !StreamResult {
 	start_ms := time.now().unix_milli()
 	c.logger.log_phase_start('api.stream', 'bytes=${body_json.len} show_output=${show_output}')
 	if show_output {
@@ -1228,7 +1223,7 @@ fn (c ApiClient) send_streaming_request_opt(body_json string, show_output bool) 
 		data:               body_json
 		read_timeout:       120 * time.second
 		write_timeout:      30 * time.second
-		on_progress_body:   fn [mut state] (request &http.Request, chunk []u8, body_so_far u64, body_expected u64, status_code int) ! {
+		on_progress_body:   fn [mut state, mut c] (request &http.Request, chunk []u8, body_so_far u64, body_expected u64, status_code int) ! {
 			if status_code != 200 {
 				return
 			}
@@ -1258,7 +1253,7 @@ fn (c ApiClient) send_streaming_request_opt(body_json string, show_output bool) 
 							state.in_thinking = true
 							if state.show_output {
 								if !state.output_started {
-									clear_phase_status_line()
+									c.clear_phase_status_line()
 									state.output_started = true
 								}
 								print('\x1b[92m🧠 Thinking: ')
@@ -1307,7 +1302,7 @@ fn (c ApiClient) send_streaming_request_opt(body_json string, show_output bool) 
 									term_ui_append_thinking(unescaped)
 								} else if state.show_output {
 									if !state.output_started {
-										clear_phase_status_line()
+										c.clear_phase_status_line()
 										state.output_started = true
 									}
 									print(unescaped)
@@ -1336,7 +1331,7 @@ fn (c ApiClient) send_streaming_request_opt(body_json string, show_output bool) 
 									term_ui_append_stream_text(unescaped)
 								} else if state.show_output {
 									if !state.output_started {
-										clear_phase_status_line()
+										c.clear_phase_status_line()
 										state.output_started = true
 									}
 									print(unescaped)
@@ -1353,13 +1348,13 @@ fn (c ApiClient) send_streaming_request_opt(body_json string, show_output bool) 
 
 	response := req.do() or {
 		c.logger.log_error('API', 'phase=api.stream duration_ms=${time.now().unix_milli() - start_ms} err=${err}')
-		clear_phase_status_line()
+		c.clear_phase_status_line()
 		return err
 	}
 
 	if response.status_code != 200 {
 		c.logger.log_error('API', 'phase=api.stream duration_ms=${time.now().unix_milli() - start_ms} status=${response.status_code}')
-		clear_phase_status_line()
+		c.clear_phase_status_line()
 		return error('API Error ${response.status_code}: ${response.body}')
 	}
 
@@ -1391,7 +1386,7 @@ fn (c ApiClient) send_streaming_request_opt(body_json string, show_output bool) 
 		term_ui_append_stream_text(final_text)
 	} else if state.show_output && state.full_text.len == 0 && final_text.len > 0 {
 		if !state.output_started {
-			clear_phase_status_line()
+			c.clear_phase_status_line()
 			state.output_started = true
 		}
 		print(final_text)
@@ -1654,7 +1649,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			}
 
 			step.end_time = time.now().unix_milli()
-			print_step_status(step)
+			print_step_status(mut c, step)
 			c.trajectory.record_step(step)
 			execution.steps << step
 
@@ -1668,7 +1663,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 				if consecutive_tool_failure_rounds == 2 {
 					c.add_message('user', 'SYSTEM: 连续两轮工具执行失败。请先探测环境状态并避免重复同样参数。')
 				} else if consecutive_tool_failure_rounds >= tool_failure_escalation_round {
-					if c.interactive_mode && !g_acp_mode {
+					if c.interactive_mode && !runtime_is_acp_mode() {
 						question := '连续${consecutive_tool_failure_rounds}轮工具失败。请告诉我你希望我下一步怎么做（例如改目标/给路径/允许先总结）。'
 						user_guidance := ask_user_tool(question)
 						if user_guidance.len > 0 && !user_guidance.starts_with('Error:')
@@ -1710,7 +1705,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 				content:      ''
 				content_json: err_json
 			}
-			if c.interactive_mode && !g_acp_mode && !max_rounds_asked_user {
+			if c.interactive_mode && !runtime_is_acp_mode() && !max_rounds_asked_user {
 				user_guidance := ask_user_tool('已达到最大工具调用轮数。请明确下一步优先级，或允许我直接总结当前结果。')
 				max_rounds_asked_user = true
 				if user_guidance.len > 0 && !user_guidance.starts_with('Error:')

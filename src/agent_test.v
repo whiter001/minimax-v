@@ -174,19 +174,21 @@ fn test_trajectory_recorder_disabled_no_recording() {
 // ===== print_step_status (no crash) =====
 
 fn test_print_step_status_no_crash() {
+	mut client := new_api_client(default_config())
 	step := AgentStep{
 		step_number: 1
 		state:       .completed
 		start_time:  time.now().unix_milli() - 1000
 		end_time:    time.now().unix_milli()
 	}
-	print_step_status(step)
+	print_step_status(mut client, step)
 }
 
 fn test_print_step_status_no_elapsed() {
+	mut client := new_api_client(default_config())
 	step := AgentStep{
 		step_number: 1
 		state:       .thinking
 	}
-	print_step_status(step) // elapsed == 0, should not crash
+	print_step_status(mut client, step) // elapsed == 0, should not crash
 }
