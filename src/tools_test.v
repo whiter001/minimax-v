@@ -245,6 +245,69 @@ fn test_send_mail_tool_validates_required_smtp_fields() {
 	assert result3.contains('CR/LF')
 }
 
+fn test_build_image_generation_request_json_defaults() {
+	body := build_image_generation_request_json({
+		'prompt': 'a red fox'
+	}) or {
+		assert false
+		return
+	}
+	assert body.contains('"model":"image-01"')
+	assert body.contains('"prompt":"a red fox"')
+	assert body.contains('"response_format":"url"')
+	assert body.contains('"n":1')
+	assert body.contains('"prompt_optimizer":false')
+	assert body.contains('"aigc_watermark":false')
+}
+
+fn test_build_image_generation_request_json_with_options() {
+	body := build_image_generation_request_json({
+		'prompt':           'a futuristic city'
+		'model':            'image-01'
+		'aspect_ratio':     '16:9'
+		'width':            '1280'
+		'height':           '720'
+		'response_format':  'base64'
+		'seed':             '42'
+		'n':                '3'
+		'prompt_optimizer': 'true'
+		'aigc_watermark':   'true'
+	}) or {
+		assert false
+		return
+	}
+	assert body.contains('"aspect_ratio":"16:9"')
+	assert body.contains('"width":1280')
+	assert body.contains('"height":720')
+	assert body.contains('"response_format":"base64"')
+	assert body.contains('"seed":42')
+	assert body.contains('"n":3')
+	assert body.contains('"prompt_optimizer":true')
+	assert body.contains('"aigc_watermark":true')
+}
+
+fn test_summarize_image_generation_response_extracts_urls() {
+	body := '{"id":"img_job_1","data":{"images":[{"url":"https://example.com/image-1.png"},{"url":"https://example.com/image-2.png"}]}}'
+	summary := summarize_image_generation_response(body)
+	assert summary.contains('img_job_1')
+	assert summary.contains('https://example.com/image-1.png')
+	assert summary.contains('https://example.com/image-2.png')
+}
+
+fn test_generate_image_tool_requires_api_key() {
+	result := image_generation_tool(Config{}, {
+		'prompt': 'a red fox'
+	})
+	assert result.contains('requires an API key')
+}
+
+fn test_get_tools_schema_json_includes_generate_image() {
+	json := get_tools_schema_json()
+	assert json.contains('"name":"generate_image"')
+	assert json.contains('"response_format"')
+	assert json.contains('"prompt_optimizer"')
+}
+
 fn test_execute_tool_use_unknown() {
 	tool := ToolUse{
 		id:    'tu_1'

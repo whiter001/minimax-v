@@ -265,6 +265,7 @@ pub mut:
 	mcp_manager             McpManager
 	trajectory              TrajectoryRecorder
 	phase_status_generation u64
+	phase_status_signature  string
 	plan_mode               bool // Plan mode: draft plan first, execute after user approval
 	silent_mode             bool // suppress console output (used by ACP mode)
 	interactive_mode        bool // true only in REPL mode where ask_user can safely block for input
@@ -295,6 +296,7 @@ fn new_api_client(config Config) ApiClient {
 		logger:                  new_logger(config.enable_logging)
 		trajectory:              new_trajectory_recorder(false)
 		phase_status_generation: 0
+		phase_status_signature:  ''
 		silent_mode:             false
 		interactive_mode:        false
 	}
@@ -812,6 +814,10 @@ fn trim_status_detail(detail string, limit int) string {
 	return detail[..limit] + '...'
 }
 
+fn phase_status_signature(message string, detail string) string {
+	return '${message}\x00${detail}'
+}
+
 fn phase_status_spinner_frame(elapsed_seconds int) string {
 	frames := ['|', '/', '-', '\\']
 	return frames[elapsed_seconds % frames.len]
@@ -850,6 +856,7 @@ fn phase_status_timer_loop(c &ApiClient, generation u64, message string, detail 
 
 fn (mut c ApiClient) clear_phase_status_line() {
 	stdatomic.add_u64(&c.phase_status_generation, 1)
+	c.phase_status_signature = ''
 	if term_ui_is_active() {
 		term_ui_clear_status()
 		return
@@ -861,10 +868,15 @@ fn (c ApiClient) should_show_phase_status() bool {
 	return c.interactive_mode && !c.silent_mode && !runtime_is_acp_mode()
 }
 
-fn (c ApiClient) print_phase_status(message string, detail string) {
+fn (mut c ApiClient) print_phase_status(message string, detail string) {
 	if !c.should_show_phase_status() {
 		return
 	}
+	signature := phase_status_signature(message, detail)
+	if c.phase_status_signature == signature {
+		return
+	}
+	c.phase_status_signature = signature
 	generation := stdatomic.add_u64(&c.phase_status_generation, 1)
 	render_phase_status_line(message, detail, 0)
 	go phase_status_timer_loop(c, generation, message, detail)
@@ -874,7 +886,8 @@ fn tool_phase_message(tool ToolUse) string {
 	builtin_names := ['str_replace_editor', 'bash', 'read_file', 'write_file', 'list_dir',
 		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'match_sop',
 		'session_note', 'task_done', 'grep_search', 'find_files', 'sequentialthinking', 'json_edit',
-		'ask_user', 'update_working_checkpoint', 'todo_manager', 'read_many_files', 'activate_skill']
+		'ask_user', 'update_working_checkpoint', 'todo_manager', 'read_many_files', 'activate_skill',
+		'generate_image', 'send_mail']
 	return match tool.name {
 		'bash', 'run_command' {
 			'执行 shell'

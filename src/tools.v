@@ -1,5 +1,6 @@
 module main
 
+import net.http
 import net.smtp
 import os
 import strings
@@ -7,6 +8,12 @@ import time
 
 const understand_image_downsample_threshold_bytes = i64(1200000)
 const understand_image_downsample_max_dimension = 1600
+const minimax_image_generation_api_url = 'https://api.minimaxi.com/v1/image_generation'
+const image_generation_prompt_max_chars = 1500
+const image_generation_supported_models = ['image-01', 'image-01-live']
+const image_generation_supported_response_formats = ['url', 'base64']
+const image_generation_supported_aspect_ratios = ['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16',
+	'21:9']
 
 __global bash_session = BashSession{}
 __global allow_desktop_control = false
@@ -527,6 +534,225 @@ fn send_mail_tool(config Config, mailserver string, mailport int, username strin
 	}
 	client.send(send_cfg) or { return 'Error: failed to send mail: ${err.msg()}' }
 	return 'Mail sent successfully to ${final_to}'
+}
+
+fn build_image_generation_request_json(input map[string]string) !string {
+	prompt := (input['prompt'] or { '' }).trim_space()
+	if prompt.len == 0 {
+		return error('prompt is required')
+	}
+	if prompt.len > image_generation_prompt_max_chars {
+		return error('prompt must be at most ${image_generation_prompt_max_chars} characters')
+	}
+
+	model := (input['model'] or { 'image-01' }).trim_space()
+	if model !in image_generation_supported_models {
+		return error('unsupported model "${model}". Use image-01 or image-01-live')
+	}
+
+	aspect_ratio := (input['aspect_ratio'] or { '' }).trim_space()
+	if aspect_ratio.len > 0 && aspect_ratio !in image_generation_supported_aspect_ratios {
+		return error('unsupported aspect_ratio "${aspect_ratio}"')
+	}
+	if model == 'image-01-live' && aspect_ratio == '21:9' {
+		return error('aspect_ratio 21:9 is only supported by image-01')
+	}
+
+	response_format := (input['response_format'] or { 'url' }).trim_space().to_lower()
+	if response_format !in image_generation_supported_response_formats {
+		return error('unsupported response_format "${response_format}"')
+	}
+
+	n_raw := (input['n'] or { '' }).trim_space()
+	if n_raw.len > 0 && !is_integer_string(n_raw) {
+		return error('n must be an integer')
+	}
+	n := parse_int_input(input, 'n', 1)
+	if n < 1 || n > 9 {
+		return error('n must be between 1 and 9')
+	}
+
+	seed_raw := (input['seed'] or { '' }).trim_space()
+	if seed_raw.len > 0 && !is_integer_string(seed_raw) {
+		return error('seed must be an integer')
+	}
+
+	width_raw := (input['width'] or { '' }).trim_space()
+	if width_raw.len > 0 && !is_integer_string(width_raw) {
+		return error('width must be an integer')
+	}
+	height_raw := (input['height'] or { '' }).trim_space()
+	if height_raw.len > 0 && !is_integer_string(height_raw) {
+		return error('height must be an integer')
+	}
+	width := parse_int_input(input, 'width', 0)
+	height := parse_int_input(input, 'height', 0)
+	if model == 'image-01-live' && (width > 0 || height > 0) {
+		return error('width and height are only supported by image-01')
+	}
+	if (width > 0 || height > 0) && (width <= 0 || height <= 0) {
+		return error('width and height must be set together')
+	}
+	if width > 0 && height > 0 {
+		if width < 512 || width > 2048 || height < 512 || height > 2048 {
+			return error('width and height must be between 512 and 2048')
+		}
+		if width % 8 != 0 || height % 8 != 0 {
+			return error('width and height must be multiples of 8')
+		}
+	}
+
+	prompt_optimizer := parse_bool_input(input, 'prompt_optimizer', false)
+	aigc_watermark := parse_bool_input(input, 'aigc_watermark', false)
+	style := (input['style'] or { '' }).trim_space()
+	if style.len > 0 && model != 'image-01-live' {
+		return error('style is only supported by image-01-live')
+	}
+
+	mut body_parts := []string{}
+	body_parts << '"model":${detect_jq_value(model)}'
+	body_parts << '"prompt":${detect_jq_value(prompt)}'
+	body_parts << '"response_format":${detect_jq_value(response_format)}'
+	body_parts << '"n":${n}'
+	body_parts << '"prompt_optimizer":${if prompt_optimizer { 'true' } else { 'false' }}'
+	body_parts << '"aigc_watermark":${if aigc_watermark { 'true' } else { 'false' }}'
+	if aspect_ratio.len > 0 {
+		body_parts << '"aspect_ratio":${detect_jq_value(aspect_ratio)}'
+	}
+	if width > 0 && height > 0 {
+		body_parts << '"width":${width}'
+		body_parts << '"height":${height}'
+	}
+	if seed_raw.len > 0 {
+		body_parts << '"seed":${detect_jq_value(seed_raw)}'
+	}
+	if style.len > 0 {
+		body_parts << '"style":${detect_jq_value(style)}'
+	}
+
+	return '{' + body_parts.join(',') + '}'
+}
+
+fn image_generation_tool(config Config, input map[string]string) string {
+	if config.api_key.trim_space().len == 0 {
+		return 'Error: image generation requires an API key'
+	}
+
+	request_body := build_image_generation_request_json(input) or { return 'Error: ${err.msg()}' }
+
+	mut headers := http.new_header()
+	headers.add(.authorization, 'Bearer ${config.api_key}')
+	headers.add(.content_type, 'application/json')
+	headers.add(.connection, 'close')
+	mut req := http.Request{
+		method:        .post
+		url:           minimax_image_generation_api_url
+		header:        headers
+		data:          request_body
+		read_timeout:  180 * time.second
+		write_timeout: 60 * time.second
+	}
+	response := req.do() or { return 'Error: image generation request failed: ${err}' }
+	if response.status_code != 200 {
+		return 'Error: image generation API ${response.status_code}: ${response.body}'
+	}
+	return summarize_image_generation_response(response.body)
+}
+
+fn extract_all_json_string_values(json_str string, key string) []string {
+	mut values := []string{}
+	mut search_pos := 0
+	pattern := '"${key}"'
+	for search_pos < json_str.len {
+		remaining := json_str[search_pos..]
+		if idx := remaining.index(pattern) {
+			abs_pos := search_pos + idx
+			mut p := abs_pos + pattern.len
+			for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+				p++
+			}
+			if p >= json_str.len || json_str[p] != `:` {
+				search_pos = abs_pos + pattern.len
+				continue
+			}
+			p++
+			for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+				p++
+			}
+			if p >= json_str.len || json_str[p] != `"` {
+				search_pos = p
+				continue
+			}
+			p++
+			end := find_json_string_terminator(json_str, p)
+			if end > p {
+				values << decode_json_string(json_str[p..end])
+				search_pos = end + 1
+				continue
+			}
+			search_pos = p
+		} else {
+			break
+		}
+	}
+	return values
+}
+
+fn summarize_image_generation_response(body string) string {
+	trimmed := body.trim_space()
+	if trimmed.len == 0 {
+		return 'Error: empty image generation response'
+	}
+	mut lines := ['🖼️ 文生图请求已完成']
+	task_id := extract_json_string_value(body, 'id')
+	if task_id.len > 0 {
+		lines << 'task_id: ${task_id}'
+	}
+	urls := extract_all_json_string_values(body, 'url')
+	if urls.len > 0 {
+		lines << 'urls:'
+		for url in urls {
+			lines << '- ${url}'
+		}
+	}
+	image_urls := extract_all_json_string_values(body, 'image_url')
+	if image_urls.len > 0 {
+		lines << 'image_urls:'
+		for url in image_urls {
+			lines << '- ${url}'
+		}
+	}
+	base64_images := extract_all_json_string_values(body, 'base64')
+	if base64_images.len > 0 {
+		lines << 'base64_images: ${base64_images.len}'
+		for i, img in base64_images {
+			lines << '- image ${i + 1}: ${img.len} chars'
+		}
+	}
+	if lines.len == 1 {
+		lines << 'raw_response:'
+		lines << utf8_safe_truncate(trimmed, 4000)
+	}
+	return lines.join('\n')
+}
+
+fn is_integer_string(value string) bool {
+	if value.len == 0 {
+		return false
+	}
+	mut start := 0
+	if value[0] == `-` {
+		if value.len == 1 {
+			return false
+		}
+		start = 1
+	}
+	for i in start .. value.len {
+		if value[i] < `0` || value[i] > `9` {
+			return false
+		}
+	}
+	return true
 }
 
 fn macos_screen_recording_doctor_check() DoctorCheck {
@@ -2266,6 +2492,7 @@ fn get_available_tools() []ToolDefinition {
 		ToolDefinition{'update_working_checkpoint', '短期工作记忆 - 记录进度/约束/SOP'},
 		ToolDefinition{'todo_manager', '任务管理 - list/set/add/update/clear'},
 		ToolDefinition{'send_mail', '发送邮件 - 需 smtp 服务器和账号密码'},
+		ToolDefinition{'generate_image', '文生成图 - 调用 MiniMax 图像生成 API'},
 	]
 }
 
@@ -2621,6 +2848,7 @@ fn get_tools_schema_json() string {
 		'{"name":"read_many_files","description":"Read multiple files at once. Supports comma-separated file paths and glob patterns (e.g. *.v, src/*.ts). Returns the concatenated contents of all matched files. Max 20 files per call.","input_schema":{"type":"object","properties":{"paths":{"type":"string","description":"Comma-separated file paths or glob patterns (e.g. src/main.v,src/tools.v or src/*.v)"}},"required":["paths"]}},' +
 		'{"name":"activate_skill","description":"Activate a specialized skill to gain expert-level instructions for a specific domain. This loads the full skill prompt into your context. Use this when the task would benefit from specialized expertise. Call with the skill name.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"The name of the skill to activate (e.g. coder, reviewer, architect, debugger)"}},"required":["name"]}},' +
 		'{"name":"cron","description":"Manage cron scheduled tasks. Actions: create (add a cron job), create_once (add a one-time delayed job), list, show, delete, enable, disable, stats, log, run_now (execute immediately), daemon (start/stop/restart/status). When creating a job, if no daemon is running it will be auto-started.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: create, create_once, list, show, delete, enable, disable, stats, log, run_now, daemon, status"},"name":{"type":"string","description":"Job name (for create, create_once, delete, enable, disable)"},"schedule":{"type":"string","description":"Cron expression like */5 * * * * (for create)"},"delay_seconds":{"type":"integer","description":"Delay in seconds (for create_once)"},"command":{"type":"string","description":"Command to execute when job runs"},"job_id":{"type":"string","description":"Job ID (for show, delete, enable, disable, log, run_now)"},"daemon_action":{"type":"string","description":"Daemon sub-action: start, stop, restart, status (for daemon action)"}},"required":["action"]}},' +
+		'{"name":"generate_image","description":"Generate an image from text using the MiniMax image generation API. Supports image-01 and image-01-live.","input_schema":{"type":"object","properties":{"prompt":{"type":"string","description":"Text description of the image to generate. Max 1500 characters."},"model":{"type":"string","description":"Model name: image-01 or image-01-live","enum":["image-01","image-01-live"]},"aspect_ratio":{"type":"string","description":"Image aspect ratio, such as 1:1, 16:9, 4:3, 3:2, 2:3, 3:4, 9:16, or 21:9"},"width":{"type":"integer","description":"Width in pixels for image-01 (512-2048, multiple of 8)."},"height":{"type":"integer","description":"Height in pixels for image-01 (512-2048, multiple of 8)."},"response_format":{"type":"string","description":"Return format: url or base64","enum":["url","base64"]},"seed":{"type":"integer","description":"Optional random seed for reproducible results."},"n":{"type":"integer","description":"Number of images to generate (1-9)."},"prompt_optimizer":{"type":"boolean","description":"Whether to enable prompt optimization."},"aigc_watermark":{"type":"boolean","description":"Whether to add a watermark."},"style":{"type":"string","description":"Raw JSON style object for image-01-live."}},"required":["prompt"]}},' +
 		'{"name":"send_mail","description":"Send an email via SMTP. Requires smtp_server, smtp_port, smtp_username, smtp_password configured (via config file or MINIMAX_SMTP_* env vars).","input_schema":{"type":"object","properties":{"mailserver":{"type":"string","description":"SMTP server hostname (optional if configured in config)"},"mailport":{"type":"integer","description":"SMTP port number: 587 (TLS) or 465 (SSL) (optional if configured in config)"},"username":{"type":"string","description":"SMTP username (optional if configured in config)"},"password":{"type":"string","description":"SMTP password (optional if configured in config)"},"from":{"type":"string","description":"Sender email address (optional if configured in config)"},"to":{"type":"string","description":"Recipient email address (optional if smtp_to is configured)"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Email body content"}},"required":["subject","body"]}}' +
 		']'
 }
@@ -2812,6 +3040,9 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 			return send_mail_tool(config, mailserver, mailport, username, password, from,
 				to, subject, body)
 		}
+		'generate_image' {
+			return image_generation_tool(config, tool.input)
+		}
 		else {
 			return 'Error: Unknown tool "${tool.name}"'
 		}
@@ -2860,7 +3091,7 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string,
 		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'match_sop',
 		'record_experience', 'session_note', 'task_done', 'grep_search', 'find_files',
 		'sequentialthinking', 'json_edit', 'ask_user', 'update_working_checkpoint', 'todo_manager',
-		'read_many_files', 'activate_skill', 'cron', 'send_mail']
+		'read_many_files', 'activate_skill', 'cron', 'generate_image', 'send_mail']
 	if tool.name in builtin_names {
 		return execute_tool_use_in_workspace(tool, workspace, config)
 	}

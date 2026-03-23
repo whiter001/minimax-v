@@ -244,10 +244,16 @@ fn (mut app TermUiApp) add_tool_result(name string, result string) {
 }
 
 fn (mut app TermUiApp) set_status(text string) {
+	if app.status_line == text {
+		return
+	}
 	app.status_line = text
 }
 
 fn (mut app TermUiApp) clear_status() {
+	if app.status_line.len == 0 {
+		return
+	}
 	app.status_line = ''
 }
 
