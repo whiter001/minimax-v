@@ -298,7 +298,7 @@ fn main() {
 		if term_ui_mode {
 			start_term_ui(mut client, current_skill, prompt)
 		} else {
-			interactive_mode(mut client, current_skill)
+			interactive_mode(mut client, current_skill, prompt)
 		}
 	} else if prompt.len > 0 {
 		exit_code = headless_mode(mut client, prompt, output_format)
@@ -317,7 +317,7 @@ fn main() {
 	}
 }
 
-fn interactive_mode(mut client ApiClient, skill_name string) {
+fn interactive_mode(mut client ApiClient, skill_name string, initial_prompt string) {
 	println('\x1b[1;36m┌──────────────────────────────────────────┐\x1b[0m')
 	println('\x1b[1;36m│\x1b[0m  🤖 \x1b[1mMiniMax CLI ${version}\x1b[0m                  \x1b[1;36m│\x1b[0m')
 	println('\x1b[1;36m│\x1b[0m  Model: \x1b[33m${client.model}\x1b[0m              \x1b[1;36m│\x1b[0m')
@@ -328,6 +328,11 @@ fn interactive_mode(mut client ApiClient, skill_name string) {
 	println('\x1b[1;36m└──────────────────────────────────────────┘\x1b[0m')
 	println('\x1b[2m命令: exit | clear | config | doctor | tools | skills | commands | extensions | notes | log | quota | mcp\x1b[0m')
 	println('')
+
+	// Process initial prompt if provided (-i/--prompt-interactive)
+	if initial_prompt.len > 0 {
+		handle_interactive_general_input(mut client, initial_prompt)
+	}
 
 	mut rl := readline.Readline{}
 	for {
