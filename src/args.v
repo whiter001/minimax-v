@@ -128,7 +128,6 @@ fn cli_option_takes_value(arg string) bool {
 fn detect_prompt_mode(args []string) !(string, bool) {
 	mut prompt := ''
 	mut is_interactive := true
-	mut prompt_interactive := false
 	mut j := 1
 	for j < args.len {
 		arg := args[j]
@@ -143,7 +142,12 @@ fn detect_prompt_mode(args []string) !(string, bool) {
 				continue
 			}
 			'-i', '--prompt-interactive' {
-				prompt_interactive = true
+				// -i can carry its own prompt value
+				if j + 1 < args.len && !args[j + 1].starts_with('-') {
+					prompt = args[j + 1]
+					j++
+				}
+				is_interactive = true
 			}
 			else {
 				if cli_option_takes_value(arg) && j + 1 < args.len {
@@ -158,10 +162,6 @@ fn detect_prompt_mode(args []string) !(string, bool) {
 		}
 		j++
 	}
-	// -i/--prompt-interactive overrides is_interactive to true while preserving prompt
-	if prompt_interactive && prompt.len > 0 {
-		is_interactive = true
-	}
 	return prompt, is_interactive
 }
 
@@ -172,7 +172,7 @@ fn build_help_text() string {
 		'\x1b[1m用法:\x1b[0m',
 		'  minimax_cli                     交互模式（默认）',
 		'  minimax_cli -p "你的问题"       单次提问模式 (Headless)',
-		'  minimax_cli -p "问题" -i        执行prompt后继续交互 (Interactive)',
+		'  minimax_cli -i "你的问题"       执行prompt后继续交互 (Interactive)',
 		'  minimax_cli -p "问题" --output-format json  JSON输出模式',
 		'  minimax_cli -p "问题" --output-format plain 纯文本输出',
 		'  minimax_cli --help             显示帮助信息',
@@ -190,7 +190,7 @@ fn build_help_text() string {
 		'  --skill <name>                 使用技能 (内置/自定义 SKILL.md)',
 		'  --auto-skills                  暴露所有已发现 skills，让 AI 自动选择并激活最合适的 skill',
 		'  --stream                       启用流式响应模式',
-		'  -i, --prompt-interactive      执行prompt后继续交互模式',
+		'  -i, --prompt-interactive [prompt]  执行prompt后继续交互模式',
 		'  --enable-tools                 启用AI工具调用（AI可主动读写文件/执行命令）',
 		'  --enable-desktop-control       启用鼠标/键盘控制工具（高权限）',
 		'  --enable-screen-capture        启用屏幕截图工具',
