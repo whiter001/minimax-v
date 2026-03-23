@@ -94,6 +94,44 @@ fn test_detect_prompt_mode_skips_other_option_values() {
 	assert is_interactive
 }
 
+fn test_detect_prompt_mode_interactive_prompt_is_interactive() {
+	prompt, is_interactive := detect_prompt_mode(['minimax_cli', '-i', '1+1=?']) or { panic(err) }
+	assert prompt == '1+1=?'
+	assert is_interactive
+}
+
+fn test_runtime_scan_does_not_demote_interactive_when_i_has_prompt() {
+	mut args := ['minimax_cli', '-i', '1+1=?']
+	mut prompt := ''
+	mut is_interactive := true
+	prompt, is_interactive = detect_prompt_mode(args) or { panic(err) }
+	mut k := 1
+	for k < args.len {
+		arg := args[k]
+		match arg {
+			'-p', '--prompt' {
+				if k + 1 < args.len {
+					k++
+				}
+			}
+			'-i', '--prompt-interactive' {
+				if k + 1 < args.len && !args[k + 1].starts_with('-') {
+					k++
+				}
+			}
+			else {
+				if !arg.starts_with('-') {
+					prompt = arg
+					is_interactive = false
+				}
+			}
+		}
+		k++
+	}
+	assert prompt == '1+1=?'
+	assert is_interactive
+}
+
 fn test_apply_cli_boolean_flag_enables_streaming() {
 	mut client := new_api_client(default_config())
 	assert apply_cli_boolean_flag(mut client, '--stream')

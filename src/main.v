@@ -148,7 +148,16 @@ fn main() {
 		}
 		match arg {
 			'-p', '--prompt' {
-				// Handled in pre-scan
+				// Handled in pre-scan; skip its value to avoid treating it as positional arg
+				if k + 1 < args.len {
+					k++
+				}
+			}
+			'-i', '--prompt-interactive' {
+				// Handled in pre-scan; it may carry an optional prompt value
+				if k + 1 < args.len && !args[k + 1].starts_with('-') {
+					k++
+				}
 			}
 			'--system' {
 				if k + 1 < args.len {

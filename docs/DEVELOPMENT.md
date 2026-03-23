@@ -32,6 +32,13 @@ v -enable-globals -prod .
 ./minimax_cli -p "介绍一下 V 语言"
 ```
 
+### 执行首问后继续交互
+
+```bash
+./minimax_cli -i "1+1=?"
+./minimax_cli --prompt-interactive "先总结当前目录结构"
+```
+
 ### 交互模式
 
 ```bash
