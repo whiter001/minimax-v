@@ -286,6 +286,51 @@ fn test_build_image_generation_request_json_with_options() {
 	assert body.contains('"aigc_watermark":true')
 }
 
+fn test_build_speech_synthesis_request_json_defaults() {
+	body := build_speech_synthesis_request_json({
+		'text': 'hello world'
+	}) or {
+		assert false
+		return
+	}
+	assert body.contains('"model":"speech-2.8-hd"')
+	assert body.contains('"text":"hello world"')
+	assert body.contains('"stream":false')
+	assert body.contains('"output_format":"url"')
+	assert body.contains('"subtitle_enable":false')
+}
+
+fn test_build_speech_synthesis_request_json_with_voice_settings() {
+	body := build_speech_synthesis_request_json({
+		'prompt':             '请读出这段文本'
+		'model':              'speech-2.8-turbo'
+		'output_format':      'hex'
+		'voice_id':           'voice_001'
+		'speed':              '1.2'
+		'volume':             '0.8'
+		'pitch':              '0.9'
+		'subtitle_enable':    'true'
+		'aigc_watermark':     'true'
+		'language_boost':     'auto'
+		'voice_setting':      ''
+		'audio_setting':      '{"sample_rate":24000}'
+		'pronunciation_dict': '{"AI":"ai"}'
+		'timbre_weights':     '[{"voice_id":"voice_001","weight":1}]'
+	}) or {
+		assert false
+		return
+	}
+	assert body.contains('"model":"speech-2.8-turbo"')
+	assert body.contains('"output_format":"hex"')
+	assert body.contains('"voice_setting":{"voice_id":"voice_001","speed":1.2,"volume":0.8,"pitch":0.9}')
+	assert body.contains('"audio_setting":{"sample_rate":24000}')
+	assert body.contains('"pronunciation_dict":{"AI":"ai"}')
+	assert body.contains('"timbre_weights":[{"voice_id":"voice_001","weight":1}]')
+	assert body.contains('"language_boost":"auto"')
+	assert body.contains('"subtitle_enable":true')
+	assert body.contains('"aigc_watermark":true')
+}
+
 fn test_summarize_image_generation_response_extracts_urls() {
 	body := '{"id":"img_job_1","data":{"images":[{"url":"https://example.com/image-1.png"},{"url":"https://example.com/image-2.png"}]}}'
 	summary := summarize_image_generation_response(body)
@@ -301,11 +346,33 @@ fn test_generate_image_tool_requires_api_key() {
 	assert result.contains('requires an API key')
 }
 
+fn test_summarize_speech_synthesis_response_extracts_urls() {
+	body := '{"id":"speech_job_1","trace_id":"trace_123","data":{"audio_url":"https://example.com/audio.mp3"}}'
+	summary := summarize_speech_synthesis_response(body)
+	assert summary.contains('speech_job_1')
+	assert summary.contains('trace_123')
+	assert summary.contains('https://example.com/audio.mp3')
+}
+
+fn test_generate_speech_tool_requires_api_key() {
+	result := speech_synthesis_tool(Config{}, {
+		'text': 'hello world'
+	}, '')
+	assert result.contains('requires an API key')
+}
+
 fn test_get_tools_schema_json_includes_generate_image() {
 	json := get_tools_schema_json()
 	assert json.contains('"name":"generate_image"')
 	assert json.contains('"response_format"')
 	assert json.contains('"prompt_optimizer"')
+}
+
+fn test_get_tools_schema_json_includes_generate_speech() {
+	json := get_tools_schema_json()
+	assert json.contains('"name":"generate_speech"')
+	assert json.contains('"output_format"')
+	assert json.contains('"subtitle_enable"')
 }
 
 fn test_execute_tool_use_unknown() {

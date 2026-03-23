@@ -14,6 +14,12 @@ const image_generation_supported_models = ['image-01', 'image-01-live']
 const image_generation_supported_response_formats = ['url', 'base64']
 const image_generation_supported_aspect_ratios = ['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16',
 	'21:9']
+const minimax_speech_synthesis_api_urls = ['https://api.minimaxi.com/v1/t2a_v2',
+	'https://api-bj.minimaxi.com/v1/t2a_v2']
+const speech_synthesis_prompt_max_chars = 10000
+const speech_synthesis_supported_models = ['speech-2.8-hd', 'speech-2.8-turbo', 'speech-2.6-hd',
+	'speech-2.6-turbo', 'speech-02-hd', 'speech-02-turbo', 'speech-01-hd', 'speech-01-turbo']
+const speech_synthesis_supported_output_formats = ['url', 'hex']
 
 __global bash_session = BashSession{}
 __global allow_desktop_control = false
@@ -734,6 +740,271 @@ fn summarize_image_generation_response(body string) string {
 		lines << utf8_safe_truncate(trimmed, 4000)
 	}
 	return lines.join('\n')
+}
+
+fn extract_first_json_string_value_with_keys(body string, keys []string) string {
+	for key in keys {
+		value := extract_json_string_value(body, key)
+		if value.len > 0 {
+			return value
+		}
+	}
+	return ''
+}
+
+fn build_optional_raw_json_field(input map[string]string, key string) !string {
+	raw := (input[key] or { '' }).trim_space()
+	if raw.len == 0 {
+		return ''
+	}
+	if (raw.starts_with('{') && raw.ends_with('}')) || (raw.starts_with('[') && raw.ends_with(']')) {
+		return raw
+	}
+	return error('${key} must be a JSON object or array string')
+}
+
+fn build_speech_voice_setting_json(input map[string]string) !string {
+	raw_voice_setting := (input['voice_setting'] or { '' }).trim_space()
+	if raw_voice_setting.len > 0 {
+		if (raw_voice_setting.starts_with('{') && raw_voice_setting.ends_with('}'))
+			|| (raw_voice_setting.starts_with('[') && raw_voice_setting.ends_with(']')) {
+			return raw_voice_setting
+		}
+		return error('voice_setting must be a JSON object or array string')
+	}
+
+	mut parts := []string{}
+	voice_id := (input['voice_id'] or { '' }).trim_space()
+	if voice_id.len > 0 {
+		parts << '"voice_id":${detect_jq_value(voice_id)}'
+	}
+	speed := (input['speed'] or { '' }).trim_space()
+	if speed.len > 0 {
+		parts << '"speed":${detect_jq_value(speed)}'
+	}
+	volume := (input['volume'] or { '' }).trim_space()
+	if volume.len > 0 {
+		parts << '"volume":${detect_jq_value(volume)}'
+	}
+	pitch := (input['pitch'] or { '' }).trim_space()
+	if pitch.len > 0 {
+		parts << '"pitch":${detect_jq_value(pitch)}'
+	}
+	if parts.len == 0 {
+		return ''
+	}
+	return '{' + parts.join(',') + '}'
+}
+
+fn build_speech_synthesis_request_json(input map[string]string) !string {
+	mut text := (input['text'] or { '' }).trim_space()
+	if text.len == 0 {
+		text = (input['prompt'] or { '' }).trim_space()
+	}
+	if text.len == 0 {
+		return error('text is required')
+	}
+	if text.len > speech_synthesis_prompt_max_chars {
+		return error('text must be at most ${speech_synthesis_prompt_max_chars} characters')
+	}
+
+	model := (input['model'] or { 'speech-2.8-hd' }).trim_space()
+	if model !in speech_synthesis_supported_models {
+		return error('unsupported model "${model}"')
+	}
+
+	output_format := (input['output_format'] or { 'url' }).trim_space().to_lower()
+	if output_format !in speech_synthesis_supported_output_formats {
+		return error('unsupported output_format "${output_format}"')
+	}
+
+	subtitle_enable := parse_bool_input(input, 'subtitle_enable', false)
+	aigc_watermark := parse_bool_input(input, 'aigc_watermark', false)
+	stream := parse_bool_input(input, 'stream', false)
+	if stream {
+		return error('streaming is not supported by the synchronous speech tool')
+	}
+
+	language_boost := (input['language_boost'] or { '' }).trim_space()
+	voice_setting := build_speech_voice_setting_json(input)!
+	audio_setting := build_optional_raw_json_field(input, 'audio_setting')!
+	pronunciation_dict := build_optional_raw_json_field(input, 'pronunciation_dict')!
+	timbre_weights := build_optional_raw_json_field(input, 'timbre_weights')!
+
+	mut body_parts := []string{}
+	body_parts << '"model":${detect_jq_value(model)}'
+	body_parts << '"text":${detect_jq_value(text)}'
+	body_parts << '"stream":false'
+	body_parts << '"output_format":${detect_jq_value(output_format)}'
+	body_parts << '"subtitle_enable":${if subtitle_enable { 'true' } else { 'false' }}'
+	body_parts << '"aigc_watermark":${if aigc_watermark { 'true' } else { 'false' }}'
+	if language_boost.len > 0 {
+		body_parts << '"language_boost":${detect_jq_value(language_boost)}'
+	}
+	if voice_setting.len > 0 {
+		body_parts << '"voice_setting":${voice_setting}'
+	}
+	if audio_setting.len > 0 {
+		body_parts << '"audio_setting":${audio_setting}'
+	}
+	if pronunciation_dict.len > 0 {
+		body_parts << '"pronunciation_dict":${pronunciation_dict}'
+	}
+	if timbre_weights.len > 0 {
+		body_parts << '"timbre_weights":${timbre_weights}'
+	}
+
+	return '{' + body_parts.join(',') + '}'
+}
+
+fn summarize_speech_synthesis_response(body string) string {
+	trimmed := body.trim_space()
+	if trimmed.len == 0 {
+		return 'Error: empty speech synthesis response'
+	}
+	mut lines := ['🔊 语音合成请求已完成']
+	trace_id := extract_first_json_string_value_with_keys(body, ['trace_id'])
+	if trace_id.len > 0 {
+		lines << 'trace_id: ${trace_id}'
+	}
+	task_id := extract_first_json_string_value_with_keys(body, ['id', 'task_id'])
+	if task_id.len > 0 {
+		lines << 'task_id: ${task_id}'
+	}
+	urls := extract_all_json_string_values(body, 'url')
+	audio_urls := extract_all_json_string_values(body, 'audio_url')
+	download_urls := extract_all_json_string_values(body, 'download_url')
+	mut seen := map[string]bool{}
+	mut collected := []string{}
+	for url in urls {
+		if url.len > 0 && url !in seen {
+			seen[url] = true
+			collected << url
+		}
+	}
+	for url in audio_urls {
+		if url.len > 0 && url !in seen {
+			seen[url] = true
+			collected << url
+		}
+	}
+	for url in download_urls {
+		if url.len > 0 && url !in seen {
+			seen[url] = true
+			collected << url
+		}
+	}
+	if collected.len > 0 {
+		lines << 'audio_url:'
+		for url in collected {
+			lines << '- ${url}'
+		}
+	}
+	hex_chunks := extract_all_json_string_values(body, 'hex')
+	if hex_chunks.len > 0 {
+		lines << 'hex_chunks: ${hex_chunks.len}'
+		for i, chunk in hex_chunks {
+			lines << '- chunk ${i + 1}: ${chunk.len} chars'
+		}
+	}
+	if lines.len == 1 {
+		lines << 'raw_response:'
+		lines << utf8_safe_truncate(trimmed, 4000)
+	}
+	return lines.join('\n')
+}
+
+fn download_audio_file(audio_url string, output_path string) !string {
+	if audio_url.len == 0 {
+		return error('audio url is required')
+	}
+	mut headers := http.new_header()
+	headers.add(.connection, 'close')
+	mut req := http.Request{
+		method:        .get
+		url:           audio_url
+		header:        headers
+		read_timeout:  180 * time.second
+		write_timeout: 60 * time.second
+	}
+	response := req.do() or { return error('audio download failed: ${err}') }
+	if response.status_code != 200 {
+		return error('audio download failed: HTTP ${response.status_code}: ${response.body}')
+	}
+	parent := os.dir(output_path)
+	if parent.len > 0 {
+		os.mkdir_all(parent) or { return error('failed to create output directory: ${err.msg()}') }
+	}
+	os.write_file(output_path, response.body) or {
+		return error('failed to write audio file: ${err.msg()}')
+	}
+	return output_path
+}
+
+fn speech_synthesis_tool(config Config, input map[string]string, workspace string) string {
+	if config.api_key.trim_space().len == 0 {
+		return 'Error: speech synthesis requires an API key'
+	}
+
+	request_body := build_speech_synthesis_request_json(input) or { return 'Error: ${err.msg()}' }
+	mut last_err := 'speech synthesis request failed'
+	mut response_body := ''
+
+	for endpoint in minimax_speech_synthesis_api_urls {
+		mut headers := http.new_header()
+		headers.add(.authorization, 'Bearer ${config.api_key}')
+		headers.add(.content_type, 'application/json')
+		headers.add(.connection, 'close')
+		mut req := http.Request{
+			method:        .post
+			url:           endpoint
+			header:        headers
+			data:          request_body
+			read_timeout:  180 * time.second
+			write_timeout: 60 * time.second
+		}
+		response := req.do() or {
+			last_err = 'speech synthesis request failed for ${endpoint}: ${err}'
+			continue
+		}
+		if response.status_code == 200 {
+			response_body = response.body
+			break
+		}
+		last_err = 'speech synthesis API ${response.status_code}: ${response.body}'
+	}
+
+	if response_body.len == 0 {
+		return 'Error: ${last_err}'
+	}
+
+	mut summary := summarize_speech_synthesis_response(response_body)
+	save_path := (input['save_path'] or { '' }).trim_space()
+	if save_path.len == 0 {
+		return summary
+	}
+
+	audio_url := extract_first_json_string_value_with_keys(response_body, ['url', 'audio_url',
+		'download_url'])
+	if audio_url.len == 0 {
+		return 'Error: speech response did not include a downloadable URL'
+	}
+
+	mut resolved_output := resolve_workspace_path(save_path, workspace)
+	if resolved_output.len == 0 {
+		return 'Error: save_path is required'
+	}
+	if os.is_dir(resolved_output) {
+		resolved_output = os.join_path(resolved_output, 'speech_${time.now().unix_milli()}.mp3')
+	}
+	saved_path := download_audio_file(audio_url, resolved_output) or {
+		return 'Error: ${err.msg()}'
+	}
+	if summary.len > 0 {
+		summary += '\n'
+	}
+	summary += 'saved_audio: ${saved_path}'
+	return summary
 }
 
 fn is_integer_string(value string) bool {
@@ -2493,6 +2764,7 @@ fn get_available_tools() []ToolDefinition {
 		ToolDefinition{'todo_manager', '任务管理 - list/set/add/update/clear'},
 		ToolDefinition{'send_mail', '发送邮件 - 需 smtp 服务器和账号密码'},
 		ToolDefinition{'generate_image', '文生成图 - 调用 MiniMax 图像生成 API'},
+		ToolDefinition{'generate_speech', '文生音频 - 调用 MiniMax 语音合成 API'},
 	]
 }
 
@@ -2849,6 +3121,7 @@ fn get_tools_schema_json() string {
 		'{"name":"activate_skill","description":"Activate a specialized skill to gain expert-level instructions for a specific domain. This loads the full skill prompt into your context. Use this when the task would benefit from specialized expertise. Call with the skill name.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"The name of the skill to activate (e.g. coder, reviewer, architect, debugger)"}},"required":["name"]}},' +
 		'{"name":"cron","description":"Manage cron scheduled tasks. Actions: create (add a cron job), create_once (add a one-time delayed job), list, show, delete, enable, disable, stats, log, run_now (execute immediately), daemon (start/stop/restart/status). When creating a job, if no daemon is running it will be auto-started.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: create, create_once, list, show, delete, enable, disable, stats, log, run_now, daemon, status"},"name":{"type":"string","description":"Job name (for create, create_once, delete, enable, disable)"},"schedule":{"type":"string","description":"Cron expression like */5 * * * * (for create)"},"delay_seconds":{"type":"integer","description":"Delay in seconds (for create_once)"},"command":{"type":"string","description":"Command to execute when job runs"},"job_id":{"type":"string","description":"Job ID (for show, delete, enable, disable, log, run_now)"},"daemon_action":{"type":"string","description":"Daemon sub-action: start, stop, restart, status (for daemon action)"}},"required":["action"]}},' +
 		'{"name":"generate_image","description":"Generate an image from text using the MiniMax image generation API. Supports image-01 and image-01-live.","input_schema":{"type":"object","properties":{"prompt":{"type":"string","description":"Text description of the image to generate. Max 1500 characters."},"model":{"type":"string","description":"Model name: image-01 or image-01-live","enum":["image-01","image-01-live"]},"aspect_ratio":{"type":"string","description":"Image aspect ratio, such as 1:1, 16:9, 4:3, 3:2, 2:3, 3:4, 9:16, or 21:9"},"width":{"type":"integer","description":"Width in pixels for image-01 (512-2048, multiple of 8)."},"height":{"type":"integer","description":"Height in pixels for image-01 (512-2048, multiple of 8)."},"response_format":{"type":"string","description":"Return format: url or base64","enum":["url","base64"]},"seed":{"type":"integer","description":"Optional random seed for reproducible results."},"n":{"type":"integer","description":"Number of images to generate (1-9)."},"prompt_optimizer":{"type":"boolean","description":"Whether to enable prompt optimization."},"aigc_watermark":{"type":"boolean","description":"Whether to add a watermark."},"style":{"type":"string","description":"Raw JSON style object for image-01-live."}},"required":["prompt"]}},' +
+		'{"name":"generate_speech","description":"Generate speech audio from text using the MiniMax synchronous speech-to-audio HTTP API. Provide text plus optional model, voice settings, and save_path to download the resulting audio URL locally.","input_schema":{"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize. Alias: prompt. Max 10000 characters."},"prompt":{"type":"string","description":"Alias for text."},"model":{"type":"string","description":"Model name: speech-2.8-hd, speech-2.8-turbo, speech-2.6-hd, speech-2.6-turbo, speech-02-hd, speech-02-turbo, speech-01-hd, or speech-01-turbo","enum":["speech-2.8-hd","speech-2.8-turbo","speech-2.6-hd","speech-2.6-turbo","speech-02-hd","speech-02-turbo","speech-01-hd","speech-01-turbo"]},"output_format":{"type":"string","description":"Response format: url or hex. Use url when you want to download the audio.","enum":["url","hex"]},"voice_id":{"type":"string","description":"Optional voice id used to build voice_setting when voice_setting is not provided."},"speed":{"type":"number","description":"Optional speaking speed used to build voice_setting."},"volume":{"type":"number","description":"Optional speaking volume used to build voice_setting."},"pitch":{"type":"number","description":"Optional speaking pitch used to build voice_setting."},"voice_setting":{"type":"string","description":"Raw JSON string for the voice_setting object. If provided, it overrides voice_id/speed/volume/pitch."},"audio_setting":{"type":"string","description":"Raw JSON string for the audio_setting object."},"pronunciation_dict":{"type":"string","description":"Raw JSON string for the pronunciation_dict object."},"timbre_weights":{"type":"string","description":"Raw JSON string for the timbre_weights array or object."},"language_boost":{"type":"string","description":"Optional language_boost value such as auto or a language name."},"subtitle_enable":{"type":"boolean","description":"Whether to enable subtitle output."},"aigc_watermark":{"type":"boolean","description":"Whether to add an audio watermark."},"save_path":{"type":"string","description":"Optional local file path to download the returned audio URL."}},"required":["text"]}},' +
 		'{"name":"send_mail","description":"Send an email via SMTP. Requires smtp_server, smtp_port, smtp_username, smtp_password configured (via config file or MINIMAX_SMTP_* env vars).","input_schema":{"type":"object","properties":{"mailserver":{"type":"string","description":"SMTP server hostname (optional if configured in config)"},"mailport":{"type":"integer","description":"SMTP port number: 587 (TLS) or 465 (SSL) (optional if configured in config)"},"username":{"type":"string","description":"SMTP username (optional if configured in config)"},"password":{"type":"string","description":"SMTP password (optional if configured in config)"},"from":{"type":"string","description":"Sender email address (optional if configured in config)"},"to":{"type":"string","description":"Recipient email address (optional if smtp_to is configured)"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Email body content"}},"required":["subject","body"]}}' +
 		']'
 }
@@ -3043,6 +3316,9 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 		'generate_image' {
 			return image_generation_tool(config, tool.input)
 		}
+		'generate_speech' {
+			return speech_synthesis_tool(config, tool.input, workspace)
+		}
 		else {
 			return 'Error: Unknown tool "${tool.name}"'
 		}
@@ -3091,7 +3367,7 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string,
 		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'match_sop',
 		'record_experience', 'session_note', 'task_done', 'grep_search', 'find_files',
 		'sequentialthinking', 'json_edit', 'ask_user', 'update_working_checkpoint', 'todo_manager',
-		'read_many_files', 'activate_skill', 'cron', 'generate_image', 'send_mail']
+		'read_many_files', 'activate_skill', 'cron', 'generate_image', 'generate_speech', 'send_mail']
 	if tool.name in builtin_names {
 		return execute_tool_use_in_workspace(tool, workspace, config)
 	}

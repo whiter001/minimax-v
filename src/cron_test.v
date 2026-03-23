@@ -7,6 +7,18 @@ fn cron_test_tmp_dir(prefix string) string {
 	return os.join_path(os.temp_dir(), '${prefix}_${os.getpid()}_${time.now().unix_milli()}')
 }
 
+fn force_job_due(mut sched CronScheduler, id string) {
+	mut job := sched.jobs[id]
+	job.next_run = time.now().unix() - 1
+	sched.jobs[id] = job
+}
+
+fn force_timer_due(mut mgr TimerManager, id string) {
+	mut timer := mgr.timers[id]
+	timer.next_run = time.now().unix() - 1
+	mgr.timers[id] = timer
+}
+
 // ──────────────────────────────────────────────
 // validate_cron_expression 合法表达式
 // ──────────────────────────────────────────────
@@ -406,7 +418,7 @@ fn test_cron_scheduler_add_once_job_runs_once_and_disables() {
 	assert job.enabled
 
 	sched.start()
-	time.sleep(1100 * time.millisecond)
+	force_job_due(mut sched, job.id)
 	sched.tick() or {
 		assert false, 'tick 执行失败: ${err}'
 		return
@@ -450,7 +462,7 @@ fn test_cron_scheduler_tick_when_not_running_does_nothing() {
 	defer { os.rmdir_all(tmp) or {} }
 
 	job := sched.add_once_job('idle-job', time.now().unix() + 1, 'echo idle') or { return }
-	time.sleep(1100 * time.millisecond)
+	force_job_due(mut sched, job.id)
 	sched.tick() or {
 		assert false, '未启动调度器的 tick 不应报错: ${err}'
 		return
@@ -474,7 +486,7 @@ fn test_cron_scheduler_tick_propagates_callback_error() {
 
 	job := sched.add_once_job('bad-job', time.now().unix() + 1, 'echo bad') or { return }
 	sched.start()
-	time.sleep(1100 * time.millisecond)
+	force_job_due(mut sched, job.id)
 	sched.tick() or {
 		updated := sched.get_job(job.id) or {
 			assert false, '错误后任务应仍可查询'
@@ -565,7 +577,8 @@ fn test_timer_tick_timeout_removed_after_due() {
 	_ := mgr.set_timeout('t1', 1, 'echo timeout') or { return }
 	defer { os.rmdir_all(tmp) or {} }
 
-	time.sleep(1200 * time.millisecond)
+	timer := mgr.list_timers()[0]
+	force_timer_due(mut mgr, timer.id)
 	executed, _ := mgr.tick_execute(fn [marker] (t Timer) ! {
 		os.write_file(marker, t.id)!
 	})
@@ -578,7 +591,8 @@ fn test_timer_tick_interval_advances_next_run() {
 	mut mgr := new_timer_manager()
 	_ := mgr.set_interval('t2', 1, 'echo interval') or { return }
 
-	time.sleep(1200 * time.millisecond)
+	timer := mgr.list_timers()[0]
+	force_timer_due(mut mgr, timer.id)
 	before := mgr.list_timers()[0].next_run
 	executed, _ := mgr.tick_execute(fn (t Timer) ! {})
 	assert executed.len == 1
@@ -590,7 +604,8 @@ fn test_timer_tick_failed_timeout_still_removed() {
 	mut mgr := new_timer_manager()
 	_ := mgr.set_timeout('t3', 1, 'exit 1') or { return }
 
-	time.sleep(1200 * time.millisecond)
+	timer := mgr.list_timers()[0]
+	force_timer_due(mut mgr, timer.id)
 	executed, had_failure := mgr.tick_execute(fn (t Timer) ! {
 		return error('simulated failure')
 	})
@@ -603,7 +618,8 @@ fn test_timer_tick_failed_interval_still_advances() {
 	mut mgr := new_timer_manager()
 	_ := mgr.set_interval('t4', 1, 'exit 1') or { return }
 
-	time.sleep(1200 * time.millisecond)
+	timer := mgr.list_timers()[0]
+	force_timer_due(mut mgr, timer.id)
 	before := mgr.list_timers()[0].next_run
 	executed, had_failure := mgr.tick_execute(fn (t Timer) ! {
 		return error('simulated failure')

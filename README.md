@@ -75,7 +75,7 @@ v -enable-globals -o minimax_cli src/
 - grep、find、json 编辑。
 - ask_user、session notes、todo、checkpoint。
 - 桌面控制和截图工具。
-- 文生图（调用 MiniMax 图像生成 API）。
+- 文生图 / 文生音频（调用 MiniMax 图像生成与语音合成 API）。
 
 补充说明：
 

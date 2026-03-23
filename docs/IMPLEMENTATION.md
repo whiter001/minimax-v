@@ -61,6 +61,7 @@
 - grep、find、json_edit。
 - 桌面控制和截图。
 - 文生图（generate_image，调用 MiniMax 图像生成 API）。
+- 文生音频（generate_speech，调用 MiniMax 语音合成 API）。
 - session notes、todo、checkpoint、ask_user。
 - MCP 相关二次封装工具。
 
