@@ -2,7 +2,6 @@ module main
 
 import os
 import readline
-import strconv
 
 const version = 'v0.9.0'
 
@@ -55,21 +54,11 @@ fn expand_file_references(input string, workspace string) string {
 				}
 				expanded << '--- File: ${fpath} ---\n${display}\n--- End: ${fpath} ---'
 				println('\x1b[2m📎 Attached: ${fpath} (${content.len} chars)\x1b[0m')
+				result = result.replace(word, '')
 			}
 		}
 	}
 	if expanded.len > 0 {
-		// Remove @references from text and append content
-		for word in words {
-			w := word.trim_space()
-			if w.starts_with('@') && w.len > 1 {
-				fpath := w[1..]
-				resolved := resolve_workspace_path(fpath, workspace)
-				if os.is_file(resolved) {
-					result = result.replace(word, '')
-				}
-			}
-		}
 		result = result.trim_space()
 		if result.len > 0 {
 			result = '${result}\n\n${expanded.join('\n\n')}'
@@ -120,13 +109,6 @@ fn main() {
 	if client.auto_skills {
 		enable_auto_skills(mut client)
 	}
-	mut mcp_enabled := false
-	mut acp_mode := false
-	mut term_ui_mode := false
-	mut current_skill := ''
-	mut output_format := 'text' // text, json, plain
-	mut show_skills := false
-	mut runtime_flags := CliRuntimeFlags{}
 
 	// Initialize skill registry with workspace
 	init_skill_registry(client.workspace)
@@ -134,139 +116,23 @@ fn main() {
 
 	// Register signal handler for graceful shutdown
 	os.signal_opt(.int, sigint_handler) or {}
-
-	mut k := 1
-	for k < args.len {
-		arg := args[k]
-		if apply_cli_runtime_flag(mut client, arg, mut runtime_flags) {
-			k++
-			continue
-		}
-		if apply_cli_boolean_flag(mut client, arg) {
-			k++
-			continue
-		}
-		match arg {
-			'-p', '--prompt' {
-				// Handled in pre-scan; skip its value to avoid treating it as positional arg
-				if k + 1 < args.len {
-					k++
-				}
-			}
-			'-i', '--prompt-interactive' {
-				// Handled in pre-scan; it may carry an optional prompt value
-				if k + 1 < args.len && !args[k + 1].starts_with('-') {
-					k++
-				}
-			}
-			'--system' {
-				if k + 1 < args.len {
-					k++
-					client.system_prompt = args[k]
-				}
-			}
-			'--model' {
-				if k + 1 < args.len {
-					k++
-					client.model = args[k]
-				}
-			}
-			'--temperature' {
-				if k + 1 < args.len {
-					k++
-					if temp := strconv.atof64(args[k]) {
-						if temp > 0.0 && temp <= 1.0 {
-							client.temperature = temp
-						} else {
-							println('⚠️  temperature 应在 (0.0, 1.0] 之间，已忽略')
-						}
-					}
-				}
-			}
-			'--max-tokens' {
-				if k + 1 < args.len {
-					k++
-					if tokens := strconv.atoi(args[k]) {
-						if is_valid_max_tokens(tokens) {
-							client.max_tokens = i32(tokens)
-						} else {
-							println('⚠️  max-tokens 应在 1-${max_response_tokens} 之间，已忽略')
-						}
-					}
-				}
-			}
-			'--max-rounds' {
-				if k + 1 < args.len {
-					k++
-					if rounds := strconv.atoi(args[k]) {
-						if is_valid_max_rounds(rounds) {
-							client.max_rounds = rounds
-						} else {
-							println('⚠️  max-rounds 应在 1-${max_tool_call_rounds} 之间，已忽略')
-						}
-					}
-				}
-			}
-			'--workspace' {
-				if k + 1 < args.len {
-					k++
-					client.workspace = args[k]
-				}
-			}
-			'--skill' {
-				if k + 1 < args.len {
-					k++
-					if skill := find_skill(args[k]) {
-						client.auto_skills = false
-						client.system_prompt = skill.prompt
-						client.enable_tools = true
-						current_skill = skill.name
-						skill_registry.active_skill = skill.name
-					} else {
-						println('⚠️  未知技能: ${args[k]}')
-						print_skills_list()
-						return
-					}
-				}
-			}
-			'--output-format' {
-				if k + 1 < args.len {
-					k++
-					output_format = args[k]
-				}
-			}
-			'--token-limit' {
-				if k + 1 < args.len {
-					k++
-					if limit := strconv.atoi(args[k]) {
-						if limit > 0 && limit <= 200000 {
-							client.token_limit = limit
-						} else {
-							println('⚠️  token-limit 应在 1-200000 之间，已忽略')
-						}
-					}
-				}
-			}
-			'--quota' {
-				print_quota(client)
-				return
-			}
-			else {
-				if !arg.starts_with('-') {
-					prompt = arg
-					is_interactive = false
-				}
-			}
-		}
-		k++
+	cli_state := parse_cli_args(mut client, args, prompt, is_interactive)
+	prompt = cli_state.prompt
+	is_interactive = cli_state.is_interactive
+	current_skill := cli_state.current_skill
+	output_format := cli_state.output_format
+	runtime_flags := cli_state.runtime_flags
+	if cli_state.should_print_quota {
+		print_quota(client)
+		return
 	}
-	mcp_enabled = runtime_flags.mcp_enabled
-	acp_mode = runtime_flags.acp_mode
-	term_ui_mode = runtime_flags.term_ui_mode
+	mcp_enabled := runtime_flags.mcp_enabled
+	acp_mode := runtime_flags.acp_mode
+	term_ui_mode := runtime_flags.term_ui_mode
 	if runtime_flags.interactive_set {
 		is_interactive = runtime_flags.is_interactive
 	}
-	show_skills = runtime_flags.show_skills
+	show_skills := runtime_flags.show_skills
 
 	if acp_mode {
 		runtime_set_acp_mode(true)

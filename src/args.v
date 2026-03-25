@@ -1,6 +1,7 @@
 module main
 
 import os
+import strconv
 
 fn enable_auto_skills(mut client ApiClient) {
 	client.auto_skills = true
@@ -76,6 +77,139 @@ fn apply_cli_boolean_flag(mut client ApiClient, arg string) bool {
 	return true
 }
 
+fn take_cli_value(args []string) ?string {
+	if args.len == 0 {
+		return error('missing value')
+	}
+	return args[0]
+}
+
+struct CliValueFlagResult {
+mut:
+	consumed      int
+	current_skill string
+	output_format string
+}
+
+fn finish_cli_value_result(mut result CliValueFlagResult) CliValueFlagResult {
+	result.consumed = 1
+	return result
+}
+
+fn apply_cli_value_flag(mut client ApiClient, arg string, args []string, current_skill string, output_format string) CliValueFlagResult {
+	mut result := CliValueFlagResult{
+		consumed:      0
+		current_skill: current_skill
+		output_format: output_format
+	}
+	match arg {
+		'-p', '--prompt' {
+			// Handled in pre-scan; skip its value to avoid treating it as positional arg
+			if _ := take_cli_value(args) {
+				return finish_cli_value_result(mut result)
+			}
+		}
+		'-i', '--prompt-interactive' {
+			// Handled in pre-scan; it may carry an optional prompt value
+			if value := take_cli_value(args) {
+				if !value.starts_with('-') {
+					return finish_cli_value_result(mut result)
+				}
+			}
+		}
+		'--system' {
+			if value := take_cli_value(args) {
+				client.system_prompt = value
+				return finish_cli_value_result(mut result)
+			}
+		}
+		'--model' {
+			if value := take_cli_value(args) {
+				client.model = value
+				return finish_cli_value_result(mut result)
+			}
+		}
+		'--temperature' {
+			if value := take_cli_value(args) {
+				if temp := strconv.atof64(value) {
+					if temp > 0.0 && temp <= 1.0 {
+						client.temperature = temp
+					} else {
+						println('⚠️  temperature 应在 (0.0, 1.0] 之间，已忽略')
+					}
+				}
+				return finish_cli_value_result(mut result)
+			}
+		}
+		'--max-tokens' {
+			if value := take_cli_value(args) {
+				if tokens := strconv.atoi(value) {
+					if is_valid_max_tokens(tokens) {
+						client.max_tokens = i32(tokens)
+					} else {
+						println('⚠️  max-tokens 应在 1-${max_response_tokens} 之间，已忽略')
+					}
+				}
+				return finish_cli_value_result(mut result)
+			}
+		}
+		'--max-rounds' {
+			if value := take_cli_value(args) {
+				if rounds := strconv.atoi(value) {
+					if is_valid_max_rounds(rounds) {
+						client.max_rounds = rounds
+					} else {
+						println('⚠️  max-rounds 应在 1-${max_tool_call_rounds} 之间，已忽略')
+					}
+				}
+				return finish_cli_value_result(mut result)
+			}
+		}
+		'--workspace' {
+			if value := take_cli_value(args) {
+				client.workspace = value
+				return finish_cli_value_result(mut result)
+			}
+		}
+		'--skill' {
+			if value := take_cli_value(args) {
+				if skill := find_skill(value) {
+					client.auto_skills = false
+					client.system_prompt = skill.prompt
+					client.enable_tools = true
+					result.current_skill = skill.name
+					skill_registry.active_skill = skill.name
+				} else {
+					println('⚠️  未知技能: ${value}')
+					print_skills_list()
+					exit(1)
+				}
+				return finish_cli_value_result(mut result)
+			}
+		}
+		'--output-format' {
+			if value := take_cli_value(args) {
+				result.output_format = value
+				return finish_cli_value_result(mut result)
+			}
+		}
+		'--token-limit' {
+			if value := take_cli_value(args) {
+				if limit := strconv.atoi(value) {
+					if limit > 0 && limit <= 200000 {
+						client.token_limit = limit
+					} else {
+						println('⚠️  token-limit 应在 1-200000 之间，已忽略')
+					}
+				}
+				return finish_cli_value_result(mut result)
+			}
+		}
+		else {}
+	}
+	return result
+}
+
 struct CliRuntimeFlags {
 mut:
 	mcp_enabled     bool
@@ -111,6 +245,62 @@ fn apply_cli_runtime_flag(mut client ApiClient, arg string, mut runtime_flags Cl
 		}
 	}
 	return true
+}
+
+struct CliParseResult {
+mut:
+	prompt             string
+	is_interactive     bool
+	current_skill      string
+	output_format      string
+	runtime_flags      CliRuntimeFlags
+	should_print_quota bool
+}
+
+fn parse_cli_args(mut client ApiClient, args []string, initial_prompt string, initial_is_interactive bool) CliParseResult {
+	mut result := CliParseResult{
+		prompt:             initial_prompt
+		is_interactive:     initial_is_interactive
+		output_format:      'text'
+		runtime_flags:      CliRuntimeFlags{}
+		current_skill:      ''
+		should_print_quota: false
+	}
+
+	mut k := 1
+	for k < args.len {
+		arg := args[k]
+		if apply_cli_runtime_flag(mut client, arg, mut result.runtime_flags) {
+			k++
+			continue
+		}
+		if apply_cli_boolean_flag(mut client, arg) {
+			k++
+			continue
+		}
+		value_result := apply_cli_value_flag(mut client, arg, args[k + 1..], result.current_skill,
+			result.output_format)
+		if value_result.consumed > 0 {
+			result.current_skill = value_result.current_skill
+			result.output_format = value_result.output_format
+			k += value_result.consumed + 1
+			continue
+		}
+		match arg {
+			'--quota' {
+				result.should_print_quota = true
+				return result
+			}
+			else {
+				if !arg.starts_with('-') {
+					result.prompt = arg
+					result.is_interactive = false
+				}
+			}
+		}
+		k++
+	}
+	return result
 }
 
 fn cli_option_takes_value(arg string) bool {

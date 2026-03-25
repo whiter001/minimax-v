@@ -254,26 +254,30 @@ fn extract_content_array(body string) string {
 	return ''
 }
 
-fn extract_text_blocks(content_json string) string {
+fn extract_block_string_values(content_json string, block_type string, value_key string) string {
 	mut result := ''
 	mut search_pos := 0
+	type_pattern := '"type":"${block_type}"'
+	value_pattern := '"${value_key}":"'
 
 	for search_pos < content_json.len {
 		remaining := content_json[search_pos..]
 
-		if type_idx := remaining.index('"type":"text"') {
+		if type_idx := remaining.index(type_pattern) {
 			abs_pos := search_pos + type_idx
 			after_type := content_json[abs_pos..]
 
-			if text_idx := after_type.index('"text":"') {
-				value_start := abs_pos + text_idx + 8
+			if value_idx := after_type.index(value_pattern) {
+				value_start := abs_pos + value_idx + value_pattern.len
 				end := find_json_string_terminator(content_json, value_start)
 				if end > value_start {
 					result += decode_json_string(content_json[value_start..end])
+					search_pos = end + 1
+				} else {
+					search_pos = value_start
 				}
-				search_pos = end + 1
 			} else {
-				search_pos = abs_pos + 13
+				search_pos = abs_pos + type_pattern.len
 			}
 		} else {
 			break
@@ -282,32 +286,12 @@ fn extract_text_blocks(content_json string) string {
 	return result
 }
 
+fn extract_text_blocks(content_json string) string {
+	return extract_block_string_values(content_json, 'text', 'text')
+}
+
 fn extract_thinking_blocks(content_json string) string {
-	mut result := ''
-	mut search_pos := 0
-
-	for search_pos < content_json.len {
-		remaining := content_json[search_pos..]
-
-		if type_idx := remaining.index('"type":"thinking"') {
-			abs_pos := search_pos + type_idx
-			after_type := content_json[abs_pos..]
-
-			if text_idx := after_type.index('"thinking":"') {
-				value_start := abs_pos + text_idx + 12
-				end := find_json_string_terminator(content_json, value_start)
-				if end > value_start {
-					result += decode_json_string(content_json[value_start..end])
-				}
-				search_pos = end + 1
-			} else {
-				search_pos = abs_pos + 16
-			}
-		} else {
-			break
-		}
-	}
-	return result
+	return extract_block_string_values(content_json, 'thinking', 'thinking')
 }
 
 // decode_json_string decodes JSON string escape sequences including \uXXXX unicode escapes

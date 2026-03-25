@@ -65,50 +65,35 @@ fn new_bash_session(workspace string) BashSession {
 	}
 }
 
-fn find_bash_path() string {
-	// Try to find bash in common locations
-	possible_paths := [
-		'bash', // Already in PATH
-		'C:\\Program Files\\Git\\bin\\bash.exe',
-		'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
-		'D:\\Program Files\\Git\\bin\\bash.exe',
-		'/usr/bin/bash',
-		'/bin/bash',
-	]
-
-	for path in possible_paths {
+fn find_command_path(command string, fallback_paths []string) string {
+	if command.trim_space().len == 0 {
+		return ''
+	}
+	if resolved := os.find_abs_path_of_executable(command) {
+		return resolved
+	}
+	for path in fallback_paths {
 		if os.exists(path) {
 			return path
-		}
-		// Try to execute to see if it's in PATH
-		if path == 'bash' {
-			result := os.execute('bash --version')
-			if result.exit_code == 0 {
-				return 'bash'
-			}
 		}
 	}
 	return ''
 }
 
+fn find_bash_path() string {
+	return find_command_path('bash', [
+		'C:\\Program Files\\Git\\bin\\bash.exe',
+		'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+		'/usr/bin/bash',
+		'/bin/bash',
+	])
+}
+
 fn find_pwsh_path() string {
-	possible_paths := [
-		'pwsh',
+	return find_command_path('pwsh', [
 		'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
 		'C:\\Program Files\\PowerShell\\7-preview\\pwsh.exe',
-	]
-	for path in possible_paths {
-		if os.exists(path) {
-			return path
-		}
-		if path == 'pwsh' {
-			result := os.execute('pwsh -Version')
-			if result.exit_code == 0 {
-				return 'pwsh'
-			}
-		}
-	}
-	return ''
+	])
 }
 
 fn should_use_windows_direct_command(command string) bool {
@@ -142,11 +127,6 @@ fn (mut s BashSession) execute_with_windows_pwsh(command string) string {
 	if pwsh_path.len == 0 {
 		return ''
 	}
-	actual_pwsh := if pwsh_path == 'pwsh' {
-		os.find_abs_path_of_executable('pwsh') or { 'pwsh' }
-	} else {
-		pwsh_path
-	}
 	ts := time.now().unix_milli()
 	tmp_ps := os.join_path(os.temp_dir(), 'minimax_bash_pwsh_${ts}.ps1')
 	mut lines := [
@@ -163,7 +143,7 @@ fn (mut s BashSession) execute_with_windows_pwsh(command string) string {
 	defer {
 		os.rm(tmp_ps) or {}
 	}
-	result := os.execute('"${actual_pwsh}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${tmp_ps}"')
+	result := os.execute('"${pwsh_path}" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${tmp_ps}"')
 	mut output := result.output
 	exit_code := result.exit_code
 
@@ -230,14 +210,7 @@ fn (mut s BashSession) execute(command string) string {
 		// Append cwd tracker so we can update s.cwd if the command uses cd
 		full_cmd := env_exports + command + '; echo __CWD_MARKER__=$(pwd)'
 		bash_c_arg := if os.user_os() == 'windows' { full_cmd.replace('"', '\\"') } else { full_cmd }
-
-		// Resolve full path when bash is only 'bash' (in PATH), since os.Process needs full path on Windows
-		actual_bash := if bash_path == 'bash' {
-			os.find_abs_path_of_executable('bash') or { 'bash' }
-		} else {
-			bash_path
-		}
-		mut p := os.new_process(actual_bash)
+		mut p := os.new_process(bash_path)
 		p.set_args(['-c', bash_c_arg])
 		p.set_work_folder(s.cwd)
 		p.use_stdio_ctl = true

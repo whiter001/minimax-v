@@ -724,8 +724,9 @@ fn summarize_user_tool_result_for_api(msg ChatMessage) string {
 		return '[Historical tool result omitted for API compatibility]'
 	}
 	joined := contents.join('\n\n')
-	if joined.len > max_tool_output_chars {
-		return '[Historical tool result]\n' + utf8_safe_truncate(joined, max_tool_output_chars) +
+	truncated, is_truncated := truncate_tool_output_with_notice(joined, max_tool_output_chars)
+	if is_truncated {
+		return '[Historical tool result]\n' + truncated +
 			'\n\n[... truncated for API compatibility]'
 	}
 	return '[Historical tool result]\n' + joined
@@ -805,6 +806,14 @@ fn summarize_tool_timing_detail(tool ToolUse) string {
 		return 'input_keys=[]'
 	}
 	return 'input_keys=[${keys.join(',')}]'
+}
+
+fn truncate_tool_output_with_notice(text string, max_bytes int) (string, bool) {
+	if text.len <= max_bytes {
+		return text, false
+	}
+	return utf8_safe_truncate(text, max_bytes) +
+		'\n\n[... truncated, ${text.len - max_bytes} chars omitted]', true
 }
 
 fn trim_status_detail(detail string, limit int) string {
@@ -1078,13 +1087,7 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 			tool_results << raw_result
 			tool_names << tu.name
 		}
-		is_truncated := raw_result.len > max_tool_output_chars
-		result := if is_truncated {
-			utf8_safe_truncate(raw_result, max_tool_output_chars) +
-				'\n\n[... truncated, ${raw_result.len - max_tool_output_chars} chars omitted]'
-		} else {
-			raw_result
-		}
+		result, is_truncated := truncate_tool_output_with_notice(raw_result, max_tool_output_chars)
 		c.logger.log_tool_result(tu.name, raw_result.len, is_truncated)
 		c.logger.log_tool_result_detail(tu.name, raw_result)
 		escaped := escape_json_string(result)
