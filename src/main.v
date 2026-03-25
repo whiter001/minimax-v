@@ -35,7 +35,7 @@ fn confirm_refined_prompt(refined string) bool {
 // Supports: @path/to/file — reads file content and appends it to the prompt
 fn expand_file_references(input string, workspace string) string {
 	// Find all @path patterns (not preceded by letter/digit, followed by a valid path)
-	mut result := input
+	mut parts := []string{}
 	mut expanded := []string{}
 	words := input.split(' ')
 	for word in words {
@@ -54,10 +54,12 @@ fn expand_file_references(input string, workspace string) string {
 				}
 				expanded << '--- File: ${fpath} ---\n${display}\n--- End: ${fpath} ---'
 				println('\x1b[2m📎 Attached: ${fpath} (${content.len} chars)\x1b[0m')
-				result = result.replace(word, '')
+				continue
 			}
 		}
+		parts << word
 	}
+	mut result := parts.join(' ')
 	if expanded.len > 0 {
 		result = result.trim_space()
 		if result.len > 0 {

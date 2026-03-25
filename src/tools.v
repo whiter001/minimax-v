@@ -111,17 +111,6 @@ fn escape_powershell_single_quoted(s string) string {
 	return s.replace("'", "''")
 }
 
-fn extract_pwsh_cwd(output string) (string, string) {
-	if cwd_idx := output.index('__PWSH_CWD__=') {
-		cwd_line := output[cwd_idx + 13..]
-		newline_idx := cwd_line.index('\n') or { cwd_line.len }
-		new_cwd := cwd_line[..newline_idx].trim_space()
-		clean_output := output[..cwd_idx].trim_right('\n ')
-		return new_cwd, clean_output
-	}
-	return '', output
-}
-
 fn (mut s BashSession) execute_with_windows_pwsh(command string) string {
 	pwsh_path := find_pwsh_path()
 	if pwsh_path.len == 0 {
@@ -147,14 +136,34 @@ fn (mut s BashSession) execute_with_windows_pwsh(command string) string {
 	mut output := result.output
 	exit_code := result.exit_code
 
-	new_cwd, clean_output := extract_pwsh_cwd(output)
-	if new_cwd.len > 0 && os.is_dir(new_cwd) {
-		s.cwd = new_cwd
+	output = update_session_cwd_from_marker(mut s, output, '__PWSH_CWD__=', false)
+	return format_shell_result(exit_code, s.cwd, output)
+}
+
+fn update_session_cwd_from_marker(mut s BashSession, output string, marker string, convert_bash_path bool) string {
+	if cwd_idx := output.index(marker) {
+		cwd_line := output[cwd_idx + marker.len..]
+		newline_idx := cwd_line.index('\n') or { cwd_line.len }
+		new_cwd_raw := cwd_line[..newline_idx].trim_space()
+		new_cwd := if convert_bash_path && new_cwd_raw.starts_with('/') && new_cwd_raw.len >= 3
+			&& new_cwd_raw[2] == `/` {
+			new_cwd_raw[1..2].to_upper() + ':' + new_cwd_raw[2..].replace('/', '\\')
+		} else {
+			new_cwd_raw
+		}
+		if new_cwd.len > 0 && os.is_dir(new_cwd) {
+			s.cwd = new_cwd
+		}
+		return output[..cwd_idx].trim_right('\n ')
 	}
+	return output
+}
+
+fn format_shell_result(exit_code int, cwd string, output string) string {
 	if exit_code != 0 {
-		return 'Exit code: ${exit_code}\n[cwd: ${s.cwd}]\n${clean_output}'
+		return 'Exit code: ${exit_code}\n[cwd: ${cwd}]\n${output}'
 	}
-	return '${clean_output}\n[cwd: ${s.cwd}]'
+	return '${output}\n[cwd: ${cwd}]'
 }
 
 fn (mut s BashSession) execute(command string) string {
@@ -221,28 +230,8 @@ fn (mut s BashSession) execute(command string) string {
 		exit_code := p.code
 		p.close()
 
-		// Extract and update cwd from marker
-		if cwd_idx := output.index('__CWD_MARKER__=') {
-			cwd_line := output[cwd_idx + 15..]
-			newline_idx := cwd_line.index('\n') or { cwd_line.len }
-			new_cwd_raw := cwd_line[..newline_idx].trim_space()
-			// Convert bash /d/path to Windows D:\path if needed
-			new_cwd := if new_cwd_raw.starts_with('/') && new_cwd_raw.len >= 3
-				&& new_cwd_raw[2] == `/` {
-				new_cwd_raw[1..2].to_upper() + ':' + new_cwd_raw[2..].replace('/', '\\')
-			} else {
-				new_cwd_raw
-			}
-			if new_cwd.len > 0 && os.is_dir(new_cwd) {
-				s.cwd = new_cwd
-			}
-			output = output[..cwd_idx].trim_right('\n ')
-		}
-
-		if exit_code != 0 {
-			return 'Exit code: ${exit_code}\n[cwd: ${s.cwd}]\n${output}'
-		}
-		return '${output}\n[cwd: ${s.cwd}]'
+		output = update_session_cwd_from_marker(mut s, output, '__CWD_MARKER__=', true)
+		return format_shell_result(exit_code, s.cwd, output)
 	} else {
 		// Fallback: Windows cmd.exe
 		mut parts := []string{}
@@ -257,21 +246,8 @@ fn (mut s BashSession) execute(command string) string {
 		result := os.execute('cmd /c ${shell_escape_windows(full_cmd)}')
 		mut output := result.output
 
-		// Extract new cwd from output
-		if cwd_idx := output.index('__CMD_CWD__=') {
-			cwd_line := output[cwd_idx + 12..]
-			newline_idx := cwd_line.index('\n') or { cwd_line.len }
-			new_cwd := cwd_line[..newline_idx].trim_space()
-			if new_cwd.len > 0 && os.is_dir(new_cwd) {
-				s.cwd = new_cwd
-			}
-			output = output[..cwd_idx].trim_right('\n ')
-		}
-
-		if result.exit_code != 0 {
-			return 'Exit code: ${result.exit_code}\n[cwd: ${s.cwd}]\n${output}'
-		}
-		return '${output}\n[cwd: ${s.cwd}]'
+		output = update_session_cwd_from_marker(mut s, output, '__CMD_CWD__=', false)
+		return format_shell_result(result.exit_code, s.cwd, output)
 	}
 }
 
@@ -1970,6 +1946,11 @@ fn save_todo_manager_state() ! {
 	os.write_file(path, lines.join('\n'))!
 }
 
+fn persist_todo_manager_state() string {
+	save_todo_manager_state() or { return 'Error: Failed to persist TODO list: ${err.msg()}' }
+	return ''
+}
+
 fn todo_manager_tool(action string, items_json string, id int, title string, status string) string {
 	todo_manager_load_once()
 	match action {
@@ -1981,8 +1962,9 @@ fn todo_manager_tool(action string, items_json string, id int, title string, sta
 			// Parse items from the title field: "1. item one\n2. item two"
 			if title.len > 0 {
 				result := todo_set_from_text(title)
-				save_todo_manager_state() or {
-					return 'Error: Failed to persist TODO list: ${err.msg()}'
+				persist_err := persist_todo_manager_state()
+				if persist_err.len > 0 {
+					return persist_err
 				}
 				return result
 			}
@@ -1998,8 +1980,9 @@ fn todo_manager_tool(action string, items_json string, id int, title string, sta
 				title:  sanitize_todo_title(title)
 				status: 'pending'
 			}
-			save_todo_manager_state() or {
-				return 'Error: Failed to persist TODO list: ${err.msg()}'
+			persist_err := persist_todo_manager_state()
+			if persist_err.len > 0 {
+				return persist_err
 			}
 			return '✅ Added TODO #${new_id}: ${title}'
 		}
@@ -2015,8 +1998,9 @@ fn todo_manager_tool(action string, items_json string, id int, title string, sta
 						title:  if title.len > 0 { sanitize_todo_title(title) } else { item.title }
 						status: new_status
 					}
-					save_todo_manager_state() or {
-						return 'Error: Failed to persist TODO list: ${err.msg()}'
+					persist_err := persist_todo_manager_state()
+					if persist_err.len > 0 {
+						return persist_err
 					}
 					return '✅ Updated TODO #${id}: status → ${new_status}'
 				}
@@ -2025,8 +2009,9 @@ fn todo_manager_tool(action string, items_json string, id int, title string, sta
 		}
 		'clear' {
 			todo_mgr.items = []
-			save_todo_manager_state() or {
-				return 'Error: Failed to persist TODO list: ${err.msg()}'
+			persist_err := persist_todo_manager_state()
+			if persist_err.len > 0 {
+				return persist_err
 			}
 			return '✅ TODO list cleared'
 		}
@@ -2045,7 +2030,6 @@ fn todo_set_from_text(text string) string {
 		if trimmed.len == 0 {
 			continue
 		}
-		count++
 		// Strip leading number + dot (e.g., "1. Task")
 		mut task_title := trimmed
 		if dot_idx := trimmed.index('. ') {
@@ -2057,6 +2041,7 @@ fn todo_set_from_text(text string) string {
 		if safe_title.len == 0 {
 			continue
 		}
+		count++
 		todo_mgr.items << TodoItem{
 			id:     next_todo_id()
 			title:  safe_title

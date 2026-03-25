@@ -84,6 +84,24 @@ fn take_cli_value(args []string) ?string {
 	return args[0]
 }
 
+fn parse_cli_float_value(value string, min f64, max f64) ?f64 {
+	if parsed := strconv.atof64(value) {
+		if parsed > min && parsed <= max {
+			return parsed
+		}
+	}
+	return error('invalid float value')
+}
+
+fn parse_cli_int_value(value string, min int, max int) ?int {
+	if parsed := strconv.atoi(value) {
+		if parsed >= min && parsed <= max {
+			return parsed
+		}
+	}
+	return error('invalid int value')
+}
+
 struct CliValueFlagResult {
 mut:
 	consumed      int
@@ -131,36 +149,30 @@ fn apply_cli_value_flag(mut client ApiClient, arg string, args []string, current
 		}
 		'--temperature' {
 			if value := take_cli_value(args) {
-				if temp := strconv.atof64(value) {
-					if temp > 0.0 && temp <= 1.0 {
-						client.temperature = temp
-					} else {
-						println('⚠️  temperature 应在 (0.0, 1.0] 之间，已忽略')
-					}
+				if temp := parse_cli_float_value(value, 0.0, 1.0) {
+					client.temperature = temp
+				} else {
+					println('⚠️  temperature 应在 (0.0, 1.0] 之间，已忽略')
 				}
 				return finish_cli_value_result(mut result)
 			}
 		}
 		'--max-tokens' {
 			if value := take_cli_value(args) {
-				if tokens := strconv.atoi(value) {
-					if is_valid_max_tokens(tokens) {
-						client.max_tokens = i32(tokens)
-					} else {
-						println('⚠️  max-tokens 应在 1-${max_response_tokens} 之间，已忽略')
-					}
+				if tokens := parse_cli_int_value(value, 1, max_response_tokens) {
+					client.max_tokens = i32(tokens)
+				} else {
+					println('⚠️  max-tokens 应在 1-${max_response_tokens} 之间，已忽略')
 				}
 				return finish_cli_value_result(mut result)
 			}
 		}
 		'--max-rounds' {
 			if value := take_cli_value(args) {
-				if rounds := strconv.atoi(value) {
-					if is_valid_max_rounds(rounds) {
-						client.max_rounds = rounds
-					} else {
-						println('⚠️  max-rounds 应在 1-${max_tool_call_rounds} 之间，已忽略')
-					}
+				if rounds := parse_cli_int_value(value, 1, max_tool_call_rounds) {
+					client.max_rounds = rounds
+				} else {
+					println('⚠️  max-rounds 应在 1-${max_tool_call_rounds} 之间，已忽略')
 				}
 				return finish_cli_value_result(mut result)
 			}
@@ -195,12 +207,10 @@ fn apply_cli_value_flag(mut client ApiClient, arg string, args []string, current
 		}
 		'--token-limit' {
 			if value := take_cli_value(args) {
-				if limit := strconv.atoi(value) {
-					if limit > 0 && limit <= 200000 {
-						client.token_limit = limit
-					} else {
-						println('⚠️  token-limit 应在 1-200000 之间，已忽略')
-					}
+				if limit := parse_cli_int_value(value, 1, 200000) {
+					client.token_limit = limit
+				} else {
+					println('⚠️  token-limit 应在 1-200000 之间，已忽略')
 				}
 				return finish_cli_value_result(mut result)
 			}
