@@ -77,14 +77,14 @@ fn apply_cli_boolean_flag(mut client ApiClient, arg string) bool {
 	return true
 }
 
-fn take_cli_value(args []string) ?string {
+fn take_cli_value(args []string) !string {
 	if args.len == 0 {
 		return error('missing value')
 	}
 	return args[0]
 }
 
-fn parse_cli_float_value(value string, min f64, max f64) ?f64 {
+fn parse_cli_float_value(value string, min f64, max f64) !f64 {
 	if parsed := strconv.atof64(value) {
 		if parsed > min && parsed <= max {
 			return parsed
@@ -93,7 +93,7 @@ fn parse_cli_float_value(value string, min f64, max f64) ?f64 {
 	return error('invalid float value')
 }
 
-fn parse_cli_int_value(value string, min int, max int) ?int {
+fn parse_cli_int_value(value string, min int, max int) !int {
 	if parsed := strconv.atoi(value) {
 		if parsed >= min && parsed <= max {
 			return parsed
