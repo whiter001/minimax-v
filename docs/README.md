@@ -10,6 +10,11 @@
 4. [EXTENSIBILITY.md](EXTENSIBILITY.md)：MCP、技能、命令模板、扩展和经验库机制。
 5. [DEVELOPMENT.md](DEVELOPMENT.md)：构建、格式化、测试、提交流程和排障约定。
 
+## API 参考
+
+1. [api-reference/speech-synthesis.md](api-reference/speech-synthesis.md)：语音合成参考，覆盖同步 T2A 和异步长文本语音生成。
+2. [api-reference/image-generation.md](api-reference/image-generation.md)：图像生成参考，覆盖模型、能力和使用流程。
+
 ## 文档原则
 
 - 只记录已经进入主分支实现的能力。
