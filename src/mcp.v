@@ -79,13 +79,15 @@ fn builtin_web_search_tool() McpTool {
 fn builtin_understand_image_tool() McpTool {
 	return new_mcp_tool('understand_image', 'Analyze an image file and answer questions about it.',
 		[
-		new_mcp_tool_param('image_path', 'Path to the image file.', 'string', true),
-		new_mcp_tool_param('image_source', 'Alias of image_path.', 'string', false),
-		new_mcp_tool_param('path', 'Alias of image_path.', 'string', false),
-		new_mcp_tool_param('file', 'Alias of image_path.', 'string', false),
-		new_mcp_tool_param('prompt', 'Analysis instruction or question.', 'string', false),
-		new_mcp_tool_param('question', 'Alias of prompt.', 'string', false),
-	], '{"type":"object","properties":{"image_path":{"type":"string","description":"Path to the image file."},"image_source":{"type":"string","description":"Alias of image_path."},"path":{"type":"string","description":"Alias of image_path."},"file":{"type":"string","description":"Alias of image_path."},"prompt":{"type":"string","description":"Analysis instruction or question."},"question":{"type":"string","description":"Alias of prompt."}},"required":["image_path"]}')
+		new_mcp_tool_param('image_path', 'Primary image file path.', 'string', true),
+		new_mcp_tool_param('image_source', 'Compatibility alias of image_path.', 'string',
+			false),
+		new_mcp_tool_param('path', 'Compatibility alias of image_path.', 'string', false),
+		new_mcp_tool_param('file', 'Compatibility alias of image_path.', 'string', false),
+		new_mcp_tool_param('prompt', 'Primary analysis instruction or question.', 'string',
+			false),
+		new_mcp_tool_param('question', 'Compatibility alias of prompt.', 'string', false),
+	], '{"type":"object","properties":{"image_path":{"type":"string","description":"Primary image file path."},"image_source":{"type":"string","description":"Compatibility alias of image_path."},"path":{"type":"string","description":"Compatibility alias of image_path."},"file":{"type":"string","description":"Compatibility alias of image_path."},"prompt":{"type":"string","description":"Primary analysis instruction or question."},"question":{"type":"string","description":"Compatibility alias of prompt."}},"required":["image_path"]}')
 }
 
 fn builtin_mcp_tools() []McpTool {

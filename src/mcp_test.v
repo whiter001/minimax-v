@@ -59,6 +59,9 @@ fn test_builtin_understand_image_schema_includes_aliases() {
 	assert tool.raw_schema.contains('"file"')
 	assert tool.raw_schema.contains('"prompt"')
 	assert tool.raw_schema.contains('"question"')
+	assert tool.raw_schema.contains('Primary image file path.')
+	assert tool.raw_schema.contains('Compatibility alias of image_path.')
+	assert tool.raw_schema.contains('Primary analysis instruction or question.')
 }
 
 fn test_build_mcp_process_enables_process_group() {

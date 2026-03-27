@@ -817,6 +817,30 @@ fn test_is_understand_image_retryable_error_message_detects_validation_issues() 
 	assert !is_understand_image_retryable_error_message('MCP 调用失败: transport error')
 }
 
+fn test_normalize_understand_image_input_prefers_primary_fields() {
+	input := {
+		'image_source': '/tmp/alias.png'
+		'question':     '看图'
+		'x':            '10'
+	}
+	normalized := normalize_understand_image_input(input)
+	assert normalized['image_path'] == '/tmp/alias.png'
+	assert normalized['prompt'] == '看图'
+	assert normalized['x'] == '10'
+}
+
+fn test_normalize_understand_image_input_keeps_primary_fields() {
+	input := {
+		'image_path': '/tmp/primary.png'
+		'prompt':     '请识别'
+		'path':       '/tmp/alias.png'
+		'question':   '别覆盖'
+	}
+	normalized := normalize_understand_image_input(input)
+	assert normalized['image_path'] == '/tmp/primary.png'
+	assert normalized['prompt'] == '请识别'
+}
+
 fn test_parse_macos_send_keys_windows_style_combo() {
 	send := parse_macos_send_keys('^l') or {
 		assert false

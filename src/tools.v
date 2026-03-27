@@ -2587,6 +2587,37 @@ fn is_understand_image_retryable_error_message(message string) bool {
 		|| trimmed.contains('unknown parameter')
 }
 
+fn normalize_understand_image_input(input map[string]string) map[string]string {
+	mut normalized := input.clone()
+	if (normalized['image_path'] or { '' }).trim_space().len == 0 {
+		if alias_value := normalized['image_source'] or { '' } {
+			if alias_value.trim_space().len > 0 {
+				normalized['image_path'] = alias_value
+			}
+		} else if alias_value := normalized['path'] or { '' } {
+			if alias_value.trim_space().len > 0 {
+				normalized['image_path'] = alias_value
+			}
+		} else if alias_value := normalized['file'] or { '' } {
+			if alias_value.trim_space().len > 0 {
+				normalized['image_path'] = alias_value
+			}
+		}
+	}
+	if (normalized['prompt'] or { '' }).trim_space().len == 0 {
+		if alias_value := normalized['question'] or { '' } {
+			if alias_value.trim_space().len > 0 {
+				normalized['prompt'] = alias_value
+			}
+		} else if alias_value := normalized['query'] or { '' } {
+			if alias_value.trim_space().len > 0 {
+				normalized['prompt'] = alias_value
+			}
+		}
+	}
+	return normalized
+}
+
 fn discover_understand_image_attempts(mut mcp McpManager) []UnderstandImageAttempt {
 	mut attempts := []UnderstandImageAttempt{}
 	mut discovered_path := ''
@@ -2659,6 +2690,7 @@ fn screen_analyze_tool_with_mcp(mut mcp McpManager, input map[string]string, wor
 	if !allow_screen_capture {
 		return 'Error: 屏幕截图能力未开启，请设置 enable_screen_capture=true 或使用 --enable-screen-capture'
 	}
+	normalized_input := normalize_understand_image_input(input)
 	mut has_understand_image := false
 	for tool in mcp.get_all_tools() {
 		if tool.name == 'understand_image' {
@@ -2670,18 +2702,12 @@ fn screen_analyze_tool_with_mcp(mut mcp McpManager, input map[string]string, wor
 		return 'Error: MCP 工具 understand_image 不可用，请先使用 --mcp 启动'
 	}
 
-	mut image_path := input['image_path'] or { '' }
-	if image_path.len == 0 {
-		image_path = input['image_source'] or { '' }
-	}
-	if image_path.len == 0 {
-		image_path = input['path'] or { '' }
-	}
+	mut image_path := normalized_input['image_path'] or { '' }
 	image_path = resolve_workspace_path(image_path, workspace)
-	x := parse_int_input(input, 'x', 0)
-	y := parse_int_input(input, 'y', 0)
-	width := parse_int_input(input, 'width', 0)
-	height := parse_int_input(input, 'height', 0)
+	x := parse_int_input(normalized_input, 'x', 0)
+	y := parse_int_input(normalized_input, 'y', 0)
+	width := parse_int_input(normalized_input, 'width', 0)
+	height := parse_int_input(normalized_input, 'height', 0)
 
 	mut used_capture := false
 	if image_path.trim_space().len == 0 {
@@ -2692,10 +2718,7 @@ fn screen_analyze_tool_with_mcp(mut mcp McpManager, input map[string]string, wor
 		return 'Error: image file not found: ${image_path}'
 	}
 
-	mut prompt := input['prompt'] or { '' }
-	if prompt.trim_space().len == 0 {
-		prompt = input['question'] or { '' }
-	}
+	mut prompt := normalized_input['prompt'] or { '' }
 	if prompt.trim_space().len == 0 {
 		prompt = '请描述图像内容并提取关键文本。'
 	}
