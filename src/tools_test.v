@@ -361,6 +361,71 @@ fn test_generate_speech_tool_requires_api_key() {
 	assert result.contains('requires an API key')
 }
 
+fn test_parse_speech_synthesis_command_extracts_fields() {
+	parsed := parse_speech_synthesis_command('speech --model speech-2.8-hd --output-format hex --voice-id voice_001 --speed 1.2 --volume 0.8 --pitch 0.9 --subtitle-enable --aigc-watermark --save-path out.mp3 --text-file book.txt --split --chunk-size 8000') or {
+		assert false
+		return
+	}
+	assert parsed['model'] == 'speech-2.8-hd'
+	assert parsed['output_format'] == 'hex'
+	assert parsed['voice_id'] == 'voice_001'
+	assert parsed['speed'] == '1.2'
+	assert parsed['volume'] == '0.8'
+	assert parsed['pitch'] == '0.9'
+	assert parsed['subtitle_enable'] == 'true'
+	assert parsed['aigc_watermark'] == 'true'
+	assert parsed['save_path'] == 'out.mp3'
+	assert parsed['text_file'] == 'book.txt'
+	assert parsed['split'] == 'true'
+	assert parsed['chunk_size'] == '8000'
+}
+
+fn test_load_speech_synthesis_command_text_prefers_text_file() {
+	test_path := '/tmp/__minimax_speech_input__.txt'
+	os.write_file(test_path, '  第一行\n第二行  ') or {
+		assert false
+		return
+	}
+	defer { os.rm(test_path) or {} }
+	text := load_speech_synthesis_command_text({
+		'text_file': test_path
+	}, '') or {
+		assert false
+		return
+	}
+	assert text == '第一行\n第二行'
+}
+
+fn test_split_speech_text_into_chunks_keeps_content_order() {
+	text := 'abcdefghijABCDEFGHIJ12345'
+	chunks := split_speech_text_into_chunks(text, 10)
+	assert chunks.len == 3
+	assert chunks.join('') == text
+	for chunk in chunks {
+		assert chunk.len <= 10
+	}
+}
+
+fn test_handle_builtin_command_with_client_routes_speech_command() {
+	mut client := new_api_client(default_config())
+	result := handle_builtin_command_with_client(mut client, 'speech --text hello world')
+	assert result.contains('speech synthesis requires an API key')
+}
+
+fn test_handle_builtin_command_with_client_shows_speech_help() {
+	mut client := new_api_client(default_config())
+	result := handle_builtin_command_with_client(mut client, 'speech --help')
+	assert result.contains('用法: speech')
+	assert result.contains('--text <文本>')
+}
+
+fn test_handle_builtin_command_with_client_supports_split_usage() {
+	mut client := new_api_client(default_config())
+	result := handle_builtin_command_with_client(mut client, 'speech --split --text abcdefghijklmnopqrstuvwxyz')
+	assert result.contains('speech synthesis requires an API key')
+		|| result.contains('Error: speech synthesis requires an API key')
+}
+
 fn test_get_tools_schema_json_includes_generate_image() {
 	json := get_tools_schema_json()
 	assert json.contains('"name":"generate_image"')

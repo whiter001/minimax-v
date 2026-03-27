@@ -203,7 +203,7 @@ fn interactive_mode(mut client ApiClient, skill_name string, initial_prompt stri
 		println('\x1b[1;36m│\x1b[0m  Skill: ${padded_skill}                          \x1b[1;36m│\x1b[0m')
 	}
 	println('\x1b[1;36m└──────────────────────────────────────────┘\x1b[0m')
-	println('\x1b[2m命令: exit | clear | config | doctor | tools | skills | commands | extensions | notes | log | quota | mcp\x1b[0m')
+	println('\x1b[2m命令: exit | clear | config | doctor | tools | skills | commands | extensions | notes | log | quota | mcp | speech\x1b[0m')
 	println('')
 
 	// Process initial prompt if provided (-i/--prompt-interactive)
@@ -248,7 +248,7 @@ fn headless_mode(mut client ApiClient, prompt string, output_format string) int 
 
 	print_headless_banner(client, prompt, output_format)
 
-	builtin_result := handle_builtin_command(prompt)
+	builtin_result := handle_builtin_command_with_client(mut client, prompt)
 	if builtin_result.len > 0 {
 		print_headless_basic_response(output_format, builtin_result)
 		return 0

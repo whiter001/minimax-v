@@ -152,6 +152,12 @@ fn handle_interactive_exact_command(mut client ApiClient, trimmed string) Intera
 			println('')
 			return .continue_loop
 		}
+		'speech', 'tts' {
+			println('用法: speech --text <文本> [--model MODEL] [--output-format url|hex] [--voice-id ID] [--speed N] [--volume N] [--pitch N] [--save-path PATH]')
+			println('也可以使用: tts --text <文本> ...')
+			println('')
+			return .continue_loop
+		}
 		'notes' {
 			result := session_note_read()
 			if result.starts_with('[empty]') {
@@ -401,7 +407,7 @@ fn handle_interactive_general_input(mut client ApiClient, trimmed string) {
 		return
 	}
 
-	builtin_result := handle_builtin_command(trimmed)
+	builtin_result := handle_builtin_command_with_client(mut client, trimmed)
 	if builtin_result.len > 0 {
 		println('tool > ${builtin_result}')
 	} else if trimmed.starts_with('!') {

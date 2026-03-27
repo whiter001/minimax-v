@@ -956,6 +956,277 @@ fn speech_synthesis_tool(config Config, input map[string]string, workspace strin
 	return summary
 }
 
+fn speech_synthesis_command_usage() string {
+	return '用法: speech [--model MODEL] [--output-format url|hex] [--voice-id ID] [--speed N] [--volume N] [--pitch N] [--save-path PATH] [--text-file PATH] [--split] [--chunk-size N] [--subtitle-enable] [--aigc-watermark] --text <文本>\n示例: speech --model speech-2.8-hd --voice-id voice_001 --save-path out.mp3 --text 你好，世界\n示例: speech --text-file docs/book.txt --split --save-path out/\n示例: tts --input-file docs/book.txt --split --chunk-size 8000'
+}
+
+fn is_speech_synthesis_command(input string) bool {
+	trimmed := normalize_tool_command(input)
+	if trimmed.len == 0 {
+		return false
+	}
+	head := trimmed.split(' ')[0].to_lower()
+	return head in ['speech', 'tts']
+}
+
+fn is_command_bool_value(value string) bool {
+	lower := value.trim_space().to_lower()
+	return lower in ['true', 'false', '1', '0', 'yes', 'no', 'on', 'off']
+}
+
+fn speech_synthesis_command_flag_to_key(flag string) string {
+	return match flag {
+		'--model' { 'model' }
+		'--output-format' { 'output_format' }
+		'--voice-id' { 'voice_id' }
+		'--speed' { 'speed' }
+		'--volume' { 'volume' }
+		'--pitch' { 'pitch' }
+		'--save-path' { 'save_path' }
+		'--language-boost' { 'language_boost' }
+		'--voice-setting' { 'voice_setting' }
+		'--audio-setting' { 'audio_setting' }
+		'--pronunciation-dict' { 'pronunciation_dict' }
+		'--timbre-weights' { 'timbre_weights' }
+		'--text-file', '--input-file' { 'text_file' }
+		'--split' { 'split' }
+		'--chunk-size' { 'chunk_size' }
+		'--text', '--prompt' { 'text' }
+		'--subtitle-enable' { 'subtitle_enable' }
+		'--aigc-watermark' { 'aigc_watermark' }
+		else { '' }
+	}
+}
+
+fn parse_speech_synthesis_command(input string) !map[string]string {
+	normalized := normalize_tool_command(input)
+	if normalized.len == 0 {
+		return error('speech command is empty')
+	}
+	tokens := normalized.split(' ')
+	if tokens.len == 0 {
+		return error('speech command is empty')
+	}
+	command_name := tokens[0].to_lower()
+	if !is_speech_synthesis_command(command_name) {
+		return error('not a speech command')
+	}
+
+	mut result := map[string]string{}
+	mut text_tokens := []string{}
+	mut capture_text := false
+	mut i := 1
+
+	for i < tokens.len {
+		token := tokens[i]
+		if capture_text {
+			text_tokens << token
+			i++
+			continue
+		}
+		match token {
+			'--help', '-h' {
+				result['__help__'] = 'true'
+				return result
+			}
+			'--text', '--prompt' {
+				capture_text = true
+				text_tokens = []
+				i++
+				continue
+			}
+			'--model', '--output-format', '--voice-id', '--speed', '--volume', '--pitch',
+			'--save-path', '--language-boost', '--voice-setting', '--audio-setting',
+			'--pronunciation-dict', '--timbre-weights', '--text-file', '--input-file',
+			'--chunk-size' {
+				if i + 1 >= tokens.len {
+					return error('missing value for ${token}')
+				}
+				key := speech_synthesis_command_flag_to_key(token)
+				if key.len == 0 {
+					return error('unsupported option ${token}')
+				}
+				result[key] = tokens[i + 1]
+				i += 2
+				continue
+			}
+			'--split', '--subtitle-enable', '--aigc-watermark' {
+				key := speech_synthesis_command_flag_to_key(token)
+				if key.len == 0 {
+					return error('unsupported option ${token}')
+				}
+				mut value := 'true'
+				if i + 1 < tokens.len && is_command_bool_value(tokens[i + 1]) {
+					value = tokens[i + 1]
+					i += 2
+				} else {
+					i++
+				}
+				result[key] = value
+				continue
+			}
+			else {
+				if token.starts_with('--') {
+					return error('unknown option "${token}"')
+				}
+				text_tokens << token
+				i++
+			}
+		}
+	}
+
+	if text_tokens.len > 0 {
+		result['text'] = text_tokens.join(' ')
+	}
+	has_text := (result['text'] or { '' }).trim_space().len > 0
+	has_text_file := (result['text_file'] or { '' }).trim_space().len > 0
+	if !has_text && !has_text_file {
+		return error('text or text_file is required')
+	}
+	return result
+}
+
+fn load_speech_synthesis_command_text(input map[string]string, workspace string) !string {
+	text_file := (input['text_file'] or { '' }).trim_space()
+	if text_file.len > 0 {
+		resolved_text_file := resolve_workspace_path(text_file, workspace)
+		content := os.read_file(resolved_text_file) or {
+			return error('failed to read text file "${resolved_text_file}": ${err.msg()}')
+		}
+		return content.trim_space()
+	}
+	text := (input['text'] or { '' }).trim_space()
+	if text.len > 0 {
+		return text
+	}
+	return (input['prompt'] or { '' }).trim_space()
+}
+
+fn split_speech_text_into_chunks(text string, max_bytes int) []string {
+	if text.len == 0 {
+		return []string{}
+	}
+	if max_bytes <= 0 {
+		return [text]
+	}
+	if text.len <= max_bytes {
+		return [text]
+	}
+
+	mut remaining := text
+	mut chunks := []string{}
+	for remaining.len > 0 {
+		mut chunk := utf8_safe_truncate(remaining, max_bytes)
+		if chunk.len == 0 {
+			break
+		}
+		if chunk.len < remaining.len {
+			mut break_at := 0
+			mut i := chunk.len
+			for i > 0 {
+				if chunk[i - 1] in [u8(` `), `\n`, `\r`, `\t`] {
+					break_at = i
+					break
+				}
+				i--
+			}
+			if break_at > 0 && break_at >= max_bytes / 2 {
+				chunk = chunk[..break_at]
+			}
+		}
+		if chunk.len == 0 {
+			break
+		}
+		chunks << chunk
+		remaining = remaining[chunk.len..].trim_left(' \t\r\n')
+	}
+	return chunks
+}
+
+fn derive_speech_chunk_save_path(base_save_path string, chunk_index int, chunk_count int, workspace string) string {
+	resolved_base := resolve_workspace_path(base_save_path, workspace)
+	parent := os.dir(resolved_base)
+	file_name := os.file_name(resolved_base)
+	ext := os.file_ext(file_name)
+	mut stem := if ext.len > 0 { file_name[..file_name.len - ext.len] } else { file_name }
+	if stem.len == 0 {
+		stem = 'speech'
+	}
+	chunk_name := '${stem}_${chunk_index + 1}_of_${chunk_count}${ext}'
+	if parent.len > 0 {
+		return os.join_path(parent, chunk_name)
+	}
+	return chunk_name
+}
+
+fn run_speech_synthesis_split_command(mut client ApiClient, input map[string]string) string {
+	text := load_speech_synthesis_command_text(input, client.workspace) or {
+		return 'Error: ${err.msg()}'
+	}
+	chunk_size := parse_int_input(input, 'chunk_size', speech_synthesis_prompt_max_chars)
+	mut effective_chunk_size := chunk_size
+	if effective_chunk_size <= 0 || effective_chunk_size > speech_synthesis_prompt_max_chars {
+		effective_chunk_size = speech_synthesis_prompt_max_chars
+	}
+	chunks := split_speech_text_into_chunks(text, effective_chunk_size)
+	if chunks.len == 0 {
+		return 'Error: text is required'
+	}
+	if chunks.len == 1 {
+		mut single_input := input.clone()
+		single_input['text'] = chunks[0]
+		return speech_synthesis_tool(client.config, single_input, client.workspace)
+	}
+
+	base_save_path := (input['save_path'] or { '' }).trim_space()
+	mut lines := ['🔊 语音合成分段请求已完成', 'chunks: ${chunks.len}']
+	for i, chunk in chunks {
+		mut chunk_input := input.clone()
+		chunk_input['text'] = chunk
+		if base_save_path.len > 0 {
+			chunk_input['save_path'] = derive_speech_chunk_save_path(base_save_path, i,
+				chunks.len, client.workspace)
+		}
+		result := speech_synthesis_tool(client.config, chunk_input, client.workspace)
+		if result.starts_with('Error:') {
+			return 'Error: chunk ${i + 1}/${chunks.len} failed: ${result[7..]}'
+		}
+		lines << 'chunk ${i + 1}/${chunks.len}:'
+		lines << result
+	}
+	return lines.join('\n')
+}
+
+fn run_speech_synthesis_command(mut client ApiClient, input string) string {
+	parsed := parse_speech_synthesis_command(input) or {
+		return 'Error: ${err.msg()}\n${speech_synthesis_command_usage()}'
+	}
+	if (parsed['__help__'] or { '' }).trim_space().len > 0 {
+		return speech_synthesis_command_usage()
+	}
+	if parse_bool_input(parsed, 'split', false) {
+		return run_speech_synthesis_split_command(mut client, parsed)
+	}
+	mut normalized := map[string]string{}
+	for key, value in parsed {
+		if key != '__help__' {
+			normalized[key] = value
+		}
+	}
+	text := load_speech_synthesis_command_text(normalized, client.workspace) or {
+		return 'Error: ${err.msg()}\n${speech_synthesis_command_usage()}'
+	}
+	normalized['text'] = text
+	return speech_synthesis_tool(client.config, normalized, client.workspace)
+}
+
+fn handle_builtin_command_with_client(mut client ApiClient, input string) string {
+	if is_speech_synthesis_command(input) {
+		return run_speech_synthesis_command(mut client, input)
+	}
+	return handle_builtin_command(input)
+}
+
 fn is_integer_string(value string) bool {
 	if value.len == 0 {
 		return false
