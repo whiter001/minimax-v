@@ -154,6 +154,18 @@ fn test_build_request_json_custom_prompt_overrides_agent() {
 	assert json.contains('call record_experience if you verified a stable fix')
 }
 
+fn test_build_request_json_includes_browser_wait_guidance() {
+	mut config := default_config()
+	config.api_key = 'test-key'
+	config.enable_tools = true
+	mut client := new_api_client(config)
+	client.add_message('user', 'test')
+	json := client.build_request_json()
+	assert json.contains('prefer explicit selectors, text, or URL/state checks')
+	assert json.contains('avoid long')
+	assert json.contains('networkidle')
+}
+
 fn test_build_request_json_content_json_message() {
 	mut config := default_config()
 	config.api_key = 'test-key'

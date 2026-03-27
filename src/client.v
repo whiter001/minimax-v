@@ -15,6 +15,8 @@ const default_agent_prompt = 'You are a helpful AI assistant with access to tool
 Guidelines:
 - For file operations: Use read_file, write_file, list_dir tools
 - For shell commands: Use bash tool (supports &&, ||, pipes, redirects)
+- For browser automation: prefer explicit selectors, text, or URL/state checks; avoid long `networkidle` waits unless no better signal exists
+- Keep browser waits short and iterative; recheck visible state before retrying or falling back
 - On Windows: use "start URL" to open browser, "start ." to open file explorer
 - For downloading web content: use curl or wget in bash
 - Break complex tasks into smaller steps
@@ -28,7 +30,7 @@ Rules:
 1. Preserve the user's original intent, tone, and task category.
 2. Do not turn execution requests into explanations, refusals, or generic advice.
 3. Keep tool names, file names, commands, paths, flags, and quoted strings unchanged unless a correction is strictly necessary.
-4. If the task involves tools, screen capture, browser automation, files, or commands, keep those actions explicit.
+4. If the task involves tools, screen capture, browser automation, files, or commands, keep those actions explicit. For browser automation, prefer direct state checks and short waits over long `networkidle` waits.
 5. Add only the minimum missing context, constraints, and acceptance criteria that can be safely inferred.
 6. Structure the result only when it improves clarity (Goal, Context, Constraints, Output Format).
 7. Keep the rewrite concise.
