@@ -262,16 +262,18 @@ fn test_build_image_generation_request_json_defaults() {
 
 fn test_build_image_generation_request_json_with_options() {
 	body := build_image_generation_request_json({
-		'prompt':           'a futuristic city'
-		'model':            'image-01'
-		'aspect_ratio':     '16:9'
-		'width':            '1280'
-		'height':           '720'
-		'response_format':  'base64'
-		'seed':             '42'
-		'n':                '3'
-		'prompt_optimizer': 'true'
-		'aigc_watermark':   'true'
+		'prompt':               'a futuristic city'
+		'model':                'image-01'
+		'aspect_ratio':         '16:9'
+		'width':                '1280'
+		'height':               '720'
+		'response_format':      'base64'
+		'seed':                 '42'
+		'n':                    '3'
+		'prompt_optimizer':     'true'
+		'aigc_watermark':       'true'
+		'reference_image_url':  'https://example.com/reference.png'
+		'reference_image_type': 'character'
 	}) or {
 		assert false
 		return
@@ -284,6 +286,19 @@ fn test_build_image_generation_request_json_with_options() {
 	assert body.contains('"n":3')
 	assert body.contains('"prompt_optimizer":true')
 	assert body.contains('"aigc_watermark":true')
+	assert body.contains('"subject_reference"')
+	assert body.contains('"image_file":"https://example.com/reference.png"')
+}
+
+fn test_build_image_generation_request_json_with_raw_subject_reference() {
+	body := build_image_generation_request_json({
+		'prompt':            'a portrait'
+		'subject_reference': '[{"type":"character","image_file":"https://example.com/ref.png"}]'
+	}) or {
+		assert false
+		return
+	}
+	assert body.contains('"subject_reference":[{"type":"character","image_file":"https://example.com/ref.png"}]')
 }
 
 fn test_build_speech_synthesis_request_json_defaults() {
@@ -339,10 +354,28 @@ fn test_summarize_image_generation_response_extracts_urls() {
 	assert summary.contains('https://example.com/image-2.png')
 }
 
+fn test_summarize_image_generation_response_extracts_base64_array() {
+	body := '{"id":"img_job_2","data":{"image_base64":["SGVsbG8=","V29ybGQ="]}}'
+	summary := summarize_image_generation_response(body)
+	assert summary.contains('img_job_2')
+	assert summary.contains('base64_images: 2')
+}
+
+fn test_save_image_generation_base64_file_writes_bytes() {
+	test_path := '/tmp/__minimax_image_output__.bin'
+	defer { os.rm(test_path) or {} }
+	saved_path := save_image_generation_base64_file('SGVsbG8=', test_path) or {
+		assert false
+		return
+	}
+	assert saved_path == test_path
+	assert os.read_file(test_path) or { '' } == 'Hello'
+}
+
 fn test_generate_image_tool_requires_api_key() {
 	result := image_generation_tool(Config{}, {
 		'prompt': 'a red fox'
-	})
+	}, '')
 	assert result.contains('requires an API key')
 }
 
@@ -431,6 +464,8 @@ fn test_get_tools_schema_json_includes_generate_image() {
 	assert json.contains('"name":"generate_image"')
 	assert json.contains('"response_format"')
 	assert json.contains('"prompt_optimizer"')
+	assert json.contains('"subject_reference"')
+	assert json.contains('"save_path"')
 }
 
 fn test_get_tools_schema_json_includes_generate_speech() {

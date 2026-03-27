@@ -1,5 +1,6 @@
 module main
 
+import encoding.base64
 import net.http
 import net.smtp
 import os
@@ -563,6 +564,7 @@ fn build_image_generation_request_json(input map[string]string) !string {
 	if style.len > 0 && model != 'image-01-live' {
 		return error('style is only supported by image-01-live')
 	}
+	subject_reference_json := build_image_generation_subject_reference_json(input)!
 
 	mut body_parts := []string{}
 	body_parts << '"model":${detect_jq_value(model)}'
@@ -584,16 +586,70 @@ fn build_image_generation_request_json(input map[string]string) !string {
 	if style.len > 0 {
 		body_parts << '"style":${detect_jq_value(style)}'
 	}
+	if subject_reference_json.len > 0 {
+		body_parts << '"subject_reference":${subject_reference_json}'
+	}
 
 	return '{' + body_parts.join(',') + '}'
 }
 
-fn image_generation_tool(config Config, input map[string]string) string {
+fn build_image_generation_subject_reference_json(input map[string]string) !string {
+	raw_subject_reference := (input['subject_reference'] or { '' }).trim_space()
+	if raw_subject_reference.len > 0 {
+		if (raw_subject_reference.starts_with('{') && raw_subject_reference.ends_with('}'))
+			|| (raw_subject_reference.starts_with('[') && raw_subject_reference.ends_with(']')) {
+			return raw_subject_reference
+		}
+		return error('subject_reference must be a JSON object or array string')
+	}
+
+	reference_image_url := (input['reference_image_url'] or { '' }).trim_space()
+	reference_image_urls_raw := (input['reference_image_urls'] or { '' }).trim_space()
+	if reference_image_url.len == 0 && reference_image_urls_raw.len == 0 {
+		return ''
+	}
+
+	reference_image_type := (input['reference_image_type'] or { 'character' }).trim_space()
+	mut urls := []string{}
+	if reference_image_url.len > 0 {
+		urls << reference_image_url
+	}
+	if reference_image_urls_raw.len > 0 {
+		for candidate in reference_image_urls_raw.replace('\n', ',').replace(';', ',').split(',') {
+			trimmed := candidate.trim_space()
+			if trimmed.len > 0 {
+				urls << trimmed
+			}
+		}
+	}
+
+	mut seen := map[string]bool{}
+	mut items := []string{}
+	for url in urls {
+		if url.len == 0 || url in seen {
+			continue
+		}
+		seen[url] = true
+		mut parts := []string{}
+		if reference_image_type.len > 0 {
+			parts << '"type":${detect_jq_value(reference_image_type)}'
+		}
+		parts << '"image_file":${detect_jq_value(url)}'
+		items << '{' + parts.join(',') + '}'
+	}
+	if items.len == 0 {
+		return ''
+	}
+	return '[' + items.join(',') + ']'
+}
+
+fn image_generation_tool(config Config, input map[string]string, workspace string) string {
 	if config.api_key.trim_space().len == 0 {
 		return 'Error: image generation requires an API key'
 	}
 
 	request_body := build_image_generation_request_json(input) or { return 'Error: ${err.msg()}' }
+	save_path := (input['save_path'] or { '' }).trim_space()
 
 	mut headers := http.new_header()
 	headers.add(.authorization, 'Bearer ${config.api_key}')
@@ -611,7 +667,70 @@ fn image_generation_tool(config Config, input map[string]string) string {
 	if response.status_code != 200 {
 		return 'Error: image generation API ${response.status_code}: ${response.body}'
 	}
-	return summarize_image_generation_response(response.body)
+	mut summary := summarize_image_generation_response(response.body)
+	if save_path.len == 0 {
+		return summary
+	}
+
+	image_urls := extract_json_values_for_keys(response.body, ['url', 'image_url', 'download_url'])
+	base64_images := extract_json_values_for_keys(response.body, ['base64', 'image_base64'])
+	response_format := (input['response_format'] or { 'url' }).trim_space().to_lower()
+	mut use_base64 := response_format == 'base64'
+	mut sources := if use_base64 { base64_images } else { image_urls }
+	if sources.len == 0 {
+		sources = if use_base64 { image_urls } else { base64_images }
+		use_base64 = !use_base64
+	}
+	if sources.len == 0 {
+		return 'Error: image response did not include downloadable data'
+	}
+
+	mut resolved_output := resolve_workspace_path(save_path, workspace)
+	if resolved_output.len == 0 {
+		return 'Error: save_path is required'
+	}
+	mut is_directory_target := save_path.ends_with('/') || save_path.ends_with('\\')
+		|| os.is_dir(resolved_output)
+	if is_directory_target {
+		resolved_output = resolved_output.trim_right('/\\')
+		if resolved_output.len == 0 {
+			return 'Error: save_path is required'
+		}
+		os.mkdir_all(resolved_output) or {
+			return 'Error: failed to create save directory: ${err.msg()}'
+		}
+	} else {
+		parent := os.dir(resolved_output)
+		if parent.len > 0 {
+			os.mkdir_all(parent) or {
+				return 'Error: failed to create save directory: ${err.msg()}'
+			}
+		}
+	}
+
+	mut saved_paths := []string{}
+	for i, source in sources {
+		output_path := resolve_image_generation_save_path(resolved_output, i, sources.len,
+			is_directory_target)
+		saved_path := if use_base64 {
+			save_image_generation_base64_file(source, output_path) or {
+				return 'Error: ${err.msg()}'
+			}
+		} else {
+			download_image_file(source, output_path) or { return 'Error: ${err.msg()}' }
+		}
+		saved_paths << saved_path
+	}
+
+	if saved_paths.len == 1 {
+		summary += '\nsaved_image: ${saved_paths[0]}'
+	} else {
+		summary += '\nsaved_images:'
+		for path in saved_paths {
+			summary += '\n- ${path}'
+		}
+	}
+	return summary
 }
 
 fn extract_all_json_string_values(json_str string, key string) []string {
@@ -653,6 +772,84 @@ fn extract_all_json_string_values(json_str string, key string) []string {
 	return values
 }
 
+fn extract_all_json_array_string_values(json_str string, key string) []string {
+	mut values := []string{}
+	mut search_pos := 0
+	pattern := '"${key}"'
+	for search_pos < json_str.len {
+		remaining := json_str[search_pos..]
+		if idx := remaining.index(pattern) {
+			abs_pos := search_pos + idx
+			mut p := abs_pos + pattern.len
+			for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+				p++
+			}
+			if p >= json_str.len || json_str[p] != `:` {
+				search_pos = abs_pos + pattern.len
+				continue
+			}
+			p++
+			for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+				p++
+			}
+			if p >= json_str.len || json_str[p] != `[` {
+				search_pos = p
+				continue
+			}
+			p++
+			for p < json_str.len {
+				for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`, `,`] {
+					p++
+				}
+				if p >= json_str.len || json_str[p] == `]` {
+					search_pos = p + 1
+					break
+				}
+				if json_str[p] != `"` {
+					for p < json_str.len && json_str[p] != `,` && json_str[p] != `]` {
+						p++
+					}
+					continue
+				}
+				p++
+				end := find_json_string_terminator(json_str, p)
+				if end > p {
+					values << decode_json_string(json_str[p..end])
+					p = end + 1
+					continue
+				}
+				search_pos = p
+				break
+			}
+		} else {
+			break
+		}
+	}
+	return values
+}
+
+fn dedupe_string_values(values []string) []string {
+	mut seen := map[string]bool{}
+	mut result := []string{}
+	for value in values {
+		if value.len == 0 || value in seen {
+			continue
+		}
+		seen[value] = true
+		result << value
+	}
+	return result
+}
+
+fn extract_json_values_for_keys(body string, keys []string) []string {
+	mut values := []string{}
+	for key in keys {
+		values << extract_all_json_string_values(body, key)
+		values << extract_all_json_array_string_values(body, key)
+	}
+	return dedupe_string_values(values)
+}
+
 fn summarize_image_generation_response(body string) string {
 	trimmed := body.trim_space()
 	if trimmed.len == 0 {
@@ -663,21 +860,14 @@ fn summarize_image_generation_response(body string) string {
 	if task_id.len > 0 {
 		lines << 'task_id: ${task_id}'
 	}
-	urls := extract_all_json_string_values(body, 'url')
+	urls := extract_json_values_for_keys(body, ['url', 'image_url', 'download_url'])
 	if urls.len > 0 {
 		lines << 'urls:'
 		for url in urls {
 			lines << '- ${url}'
 		}
 	}
-	image_urls := extract_all_json_string_values(body, 'image_url')
-	if image_urls.len > 0 {
-		lines << 'image_urls:'
-		for url in image_urls {
-			lines << '- ${url}'
-		}
-	}
-	base64_images := extract_all_json_string_values(body, 'base64')
+	base64_images := extract_json_values_for_keys(body, ['base64', 'image_base64'])
 	if base64_images.len > 0 {
 		lines << 'base64_images: ${base64_images.len}'
 		for i, img in base64_images {
@@ -689,6 +879,79 @@ fn summarize_image_generation_response(body string) string {
 		lines << utf8_safe_truncate(trimmed, 4000)
 	}
 	return lines.join('\n')
+}
+
+fn save_image_generation_base64_file(image_base64 string, output_path string) !string {
+	if image_base64.len == 0 {
+		return error('image base64 is required')
+	}
+	decoded := base64.decode(image_base64)
+	if decoded.len == 0 {
+		return error('failed to decode image base64')
+	}
+	parent := os.dir(output_path)
+	if parent.len > 0 {
+		os.mkdir_all(parent) or { return error('failed to create output directory: ${err.msg()}') }
+	}
+	os.write_bytes(output_path, decoded) or {
+		return error('failed to write image file: ${err.msg()}')
+	}
+	return output_path
+}
+
+fn download_image_file(image_url string, output_path string) !string {
+	if image_url.len == 0 {
+		return error('image url is required')
+	}
+	mut headers := http.new_header()
+	headers.add(.connection, 'close')
+	mut req := http.Request{
+		method:        .get
+		url:           image_url
+		header:        headers
+		read_timeout:  180 * time.second
+		write_timeout: 60 * time.second
+	}
+	response := req.do() or { return error('image download failed: ${err}') }
+	if response.status_code != 200 {
+		return error('image download failed: HTTP ${response.status_code}: ${response.body}')
+	}
+	parent := os.dir(output_path)
+	if parent.len > 0 {
+		os.mkdir_all(parent) or { return error('failed to create output directory: ${err.msg()}') }
+	}
+	os.write_bytes(output_path, response.body.bytes()) or {
+		return error('failed to write image file: ${err.msg()}')
+	}
+	return output_path
+}
+
+fn resolve_image_generation_save_path(base_save_path string, image_index int, image_count int,
+	is_directory_target bool) string {
+	if is_directory_target {
+		stamp := time.now().unix_milli()
+		suffix := if image_count > 1 { '_${image_index + 1}_of_${image_count}' } else { '' }
+		return os.join_path(base_save_path, 'image_${stamp}${suffix}.jpeg')
+	}
+	if image_count == 1 {
+		return base_save_path
+	}
+	parent := os.dir(base_save_path)
+	file_name := os.file_name(base_save_path)
+	ext := os.file_ext(file_name)
+	mut stem := if ext.len > 0 { file_name[..file_name.len - ext.len] } else { file_name }
+	if stem.len == 0 {
+		stem = 'image'
+	}
+	name := if ext.len > 0 {
+		'${stem}_${image_index + 1}_of_${image_count}${ext}'
+	} else {
+		'${stem}_${image_index + 1}_of_${image_count}'
+	}
+	if parent.len > 0 {
+		return os.join_path(parent, name)
+	}
+	return name
 }
 
 fn extract_first_json_string_value_with_keys(body string, keys []string) string {
@@ -3038,7 +3301,7 @@ fn get_available_tools() []ToolDefinition {
 		ToolDefinition{'update_working_checkpoint', '短期工作记忆 - 记录进度/约束/SOP'},
 		ToolDefinition{'todo_manager', '任务管理 - list/set/add/update/clear'},
 		ToolDefinition{'send_mail', '发送邮件 - 需 smtp 服务器和账号密码'},
-		ToolDefinition{'generate_image', '文生成图 - 调用 MiniMax 图像生成 API'},
+		ToolDefinition{'generate_image', '文生图 - 调用 MiniMax 图像生成 API（支持参考图和本地保存）'},
 		ToolDefinition{'generate_speech', '文生音频 - 调用 MiniMax 语音合成 API'},
 	]
 }
@@ -3395,7 +3658,7 @@ fn get_tools_schema_json() string {
 		'{"name":"read_many_files","description":"Read multiple files at once. Supports comma-separated file paths and glob patterns (e.g. *.v, src/*.ts). Returns the concatenated contents of all matched files. Max 20 files per call.","input_schema":{"type":"object","properties":{"paths":{"type":"string","description":"Comma-separated file paths or glob patterns (e.g. src/main.v,src/tools.v or src/*.v)"}},"required":["paths"]}},' +
 		'{"name":"activate_skill","description":"Activate a specialized skill to gain expert-level instructions for a specific domain. This loads the full skill prompt into your context. Use this when the task would benefit from specialized expertise. Call with the skill name.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"The name of the skill to activate (e.g. coder, reviewer, architect, debugger)"}},"required":["name"]}},' +
 		'{"name":"cron","description":"Manage cron scheduled tasks. Actions: create (add a cron job), create_once (add a one-time delayed job), list, show, delete, enable, disable, stats, log, run_now (execute immediately), daemon (start/stop/restart/status). When creating a job, if no daemon is running it will be auto-started.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: create, create_once, list, show, delete, enable, disable, stats, log, run_now, daemon, status"},"name":{"type":"string","description":"Job name (for create, create_once, delete, enable, disable)"},"schedule":{"type":"string","description":"Cron expression like */5 * * * * (for create)"},"delay_seconds":{"type":"integer","description":"Delay in seconds (for create_once)"},"command":{"type":"string","description":"Command to execute when job runs"},"job_id":{"type":"string","description":"Job ID (for show, delete, enable, disable, log, run_now)"},"daemon_action":{"type":"string","description":"Daemon sub-action: start, stop, restart, status (for daemon action)"}},"required":["action"]}},' +
-		'{"name":"generate_image","description":"Generate an image from text using the MiniMax image generation API. Supports image-01 and image-01-live.","input_schema":{"type":"object","properties":{"prompt":{"type":"string","description":"Text description of the image to generate. Max 1500 characters."},"model":{"type":"string","description":"Model name: image-01 or image-01-live","enum":["image-01","image-01-live"]},"aspect_ratio":{"type":"string","description":"Image aspect ratio, such as 1:1, 16:9, 4:3, 3:2, 2:3, 3:4, 9:16, or 21:9"},"width":{"type":"integer","description":"Width in pixels for image-01 (512-2048, multiple of 8)."},"height":{"type":"integer","description":"Height in pixels for image-01 (512-2048, multiple of 8)."},"response_format":{"type":"string","description":"Return format: url or base64","enum":["url","base64"]},"seed":{"type":"integer","description":"Optional random seed for reproducible results."},"n":{"type":"integer","description":"Number of images to generate (1-9)."},"prompt_optimizer":{"type":"boolean","description":"Whether to enable prompt optimization."},"aigc_watermark":{"type":"boolean","description":"Whether to add a watermark."},"style":{"type":"string","description":"Raw JSON style object for image-01-live."}},"required":["prompt"]}},' +
+		'{"name":"generate_image","description":"Generate an image from text or reference images using the MiniMax image generation API. Supports image-01 and image-01-live.","input_schema":{"type":"object","properties":{"prompt":{"type":"string","description":"Text description of the image to generate. Max 1500 characters."},"model":{"type":"string","description":"Model name: image-01 or image-01-live","enum":["image-01","image-01-live"]},"aspect_ratio":{"type":"string","description":"Image aspect ratio, such as 1:1, 16:9, 4:3, 3:2, 2:3, 3:4, 9:16, or 21:9"},"width":{"type":"integer","description":"Width in pixels for image-01 (512-2048, multiple of 8)."},"height":{"type":"integer","description":"Height in pixels for image-01 (512-2048, multiple of 8)."},"response_format":{"type":"string","description":"Return format: url or base64","enum":["url","base64"]},"seed":{"type":"integer","description":"Optional random seed for reproducible results."},"n":{"type":"integer","description":"Number of images to generate (1-9)."},"prompt_optimizer":{"type":"boolean","description":"Whether to enable prompt optimization."},"aigc_watermark":{"type":"boolean","description":"Whether to add a watermark."},"style":{"type":"string","description":"Raw JSON style object for image-01-live."},"subject_reference":{"type":"string","description":"Raw JSON string for the subject_reference field."},"reference_image_url":{"type":"string","description":"Single reference image URL."},"reference_image_urls":{"type":"string","description":"Comma or newline separated reference image URLs."},"reference_image_type":{"type":"string","description":"Reference image type, default character."},"save_path":{"type":"string","description":"Optional local file path to save generated images."}},"required":["prompt"]}},' +
 		'{"name":"generate_speech","description":"Generate speech audio from text using the MiniMax synchronous speech-to-audio HTTP API. Provide text plus optional model, voice settings, and save_path to download the resulting audio URL locally.","input_schema":{"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize. Alias: prompt. Max 10000 characters."},"prompt":{"type":"string","description":"Alias for text."},"model":{"type":"string","description":"Model name: speech-2.8-hd, speech-2.8-turbo, speech-2.6-hd, speech-2.6-turbo, speech-02-hd, speech-02-turbo, speech-01-hd, or speech-01-turbo","enum":["speech-2.8-hd","speech-2.8-turbo","speech-2.6-hd","speech-2.6-turbo","speech-02-hd","speech-02-turbo","speech-01-hd","speech-01-turbo"]},"output_format":{"type":"string","description":"Response format: url or hex. Use url when you want to download the audio.","enum":["url","hex"]},"voice_id":{"type":"string","description":"Optional voice id used to build voice_setting when voice_setting is not provided."},"speed":{"type":"number","description":"Optional speaking speed used to build voice_setting."},"volume":{"type":"number","description":"Optional speaking volume used to build voice_setting."},"pitch":{"type":"number","description":"Optional speaking pitch used to build voice_setting."},"voice_setting":{"type":"string","description":"Raw JSON string for the voice_setting object. If provided, it overrides voice_id/speed/volume/pitch."},"audio_setting":{"type":"string","description":"Raw JSON string for the audio_setting object."},"pronunciation_dict":{"type":"string","description":"Raw JSON string for the pronunciation_dict object."},"timbre_weights":{"type":"string","description":"Raw JSON string for the timbre_weights array or object."},"language_boost":{"type":"string","description":"Optional language_boost value such as auto or a language name."},"subtitle_enable":{"type":"boolean","description":"Whether to enable subtitle output."},"aigc_watermark":{"type":"boolean","description":"Whether to add an audio watermark."},"save_path":{"type":"string","description":"Optional local file path to download the returned audio URL."}},"required":["text"]}},' +
 		'{"name":"send_mail","description":"Send an email via SMTP. Requires smtp_server, smtp_port, smtp_username, smtp_password configured (via config file or MINIMAX_SMTP_* env vars).","input_schema":{"type":"object","properties":{"mailserver":{"type":"string","description":"SMTP server hostname (optional if configured in config)"},"mailport":{"type":"integer","description":"SMTP port number: 587 (TLS) or 465 (SSL) (optional if configured in config)"},"username":{"type":"string","description":"SMTP username (optional if configured in config)"},"password":{"type":"string","description":"SMTP password (optional if configured in config)"},"from":{"type":"string","description":"Sender email address (optional if configured in config)"},"to":{"type":"string","description":"Recipient email address (optional if smtp_to is configured)"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Email body content"}},"required":["subject","body"]}}' +
 		']'
@@ -3589,7 +3852,7 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 				to, subject, body)
 		}
 		'generate_image' {
-			return image_generation_tool(config, tool.input)
+			return image_generation_tool(config, tool.input, workspace)
 		}
 		'generate_speech' {
 			return speech_synthesis_tool(config, tool.input, workspace)
