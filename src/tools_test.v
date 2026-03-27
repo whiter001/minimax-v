@@ -804,6 +804,12 @@ fn test_build_macos_sips_resize_command() {
 	assert cmd == "sips -Z 1600 '/tmp/input image.png' --out '/tmp/output image.png'"
 }
 
+fn test_is_understand_image_error_result_detects_tool_errors() {
+	assert is_understand_image_error_result('Error executing tool understand_image: 1 validation error')
+	assert is_understand_image_error_result('Error: MCP response timeout for request 4')
+	assert !is_understand_image_error_result('这是一段正常的图像分析结果')
+}
+
 fn test_parse_macos_send_keys_windows_style_combo() {
 	send := parse_macos_send_keys('^l') or {
 		assert false

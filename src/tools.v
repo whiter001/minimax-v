@@ -2574,6 +2574,13 @@ fn add_understand_image_attempt(mut attempts []UnderstandImageAttempt, path_key 
 	}
 }
 
+fn is_understand_image_error_result(result string) bool {
+	trimmed := result.trim_space()
+	return trimmed.starts_with('Error executing tool') || trimmed.starts_with('Error:')
+		|| trimmed.contains('validation error for understand_imageArguments')
+		|| trimmed.contains('MCP response timeout') || trimmed.contains('MCP 调用失败')
+}
+
 fn discover_understand_image_attempts(mut mcp McpManager) []UnderstandImageAttempt {
 	mut attempts := []UnderstandImageAttempt{}
 	mut discovered_path := ''
