@@ -2578,7 +2578,13 @@ fn is_understand_image_error_result(result string) bool {
 	trimmed := result.trim_space()
 	return trimmed.starts_with('Error executing tool') || trimmed.starts_with('Error:')
 		|| trimmed.contains('validation error for understand_imageArguments')
-		|| trimmed.contains('MCP response timeout') || trimmed.contains('MCP 调用失败')
+}
+
+fn is_understand_image_retryable_error_message(message string) bool {
+	trimmed := message.trim_space()
+	return trimmed.contains('validation error') || trimmed.contains('Field required')
+		|| trimmed.contains('unexpected keyword argument') || trimmed.contains('Unknown field')
+		|| trimmed.contains('unknown parameter')
 }
 
 fn discover_understand_image_attempts(mut mcp McpManager) []UnderstandImageAttempt {
@@ -2632,7 +2638,17 @@ fn call_understand_image_with_fallback(mut mcp McpManager, image_path string, pr
 		args_json += '}'
 		result := mcp.call_tool('understand_image', args_json) or {
 			last_err = err.msg()
-			continue
+			if is_understand_image_retryable_error_message(last_err) {
+				continue
+			}
+			return error(last_err)
+		}
+		if is_understand_image_error_result(result) {
+			last_err = result
+			if is_understand_image_retryable_error_message(result) {
+				continue
+			}
+			return error(last_err)
 		}
 		return result
 	}

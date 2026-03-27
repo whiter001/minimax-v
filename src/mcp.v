@@ -6,7 +6,7 @@ import os
 import time
 
 const default_mcp_request_timeout_ms = 30000
-const understand_image_timeout_ms = 90000
+const understand_image_timeout_ms = 60000
 
 pub struct McpToolParam {
 pub:

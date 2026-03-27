@@ -810,6 +810,13 @@ fn test_is_understand_image_error_result_detects_tool_errors() {
 	assert !is_understand_image_error_result('这是一段正常的图像分析结果')
 }
 
+fn test_is_understand_image_retryable_error_message_detects_validation_issues() {
+	assert is_understand_image_retryable_error_message('1 validation error for understand_imageArguments')
+	assert is_understand_image_retryable_error_message('Field required')
+	assert !is_understand_image_retryable_error_message('MCP response timeout for request 4')
+	assert !is_understand_image_retryable_error_message('MCP 调用失败: transport error')
+}
+
 fn test_parse_macos_send_keys_windows_style_combo() {
 	send := parse_macos_send_keys('^l') or {
 		assert false
