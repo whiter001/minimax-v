@@ -676,9 +676,9 @@ fn image_generation_tool(config Config, input map[string]string, workspace strin
 	base64_images := extract_json_values_for_keys(response.body, ['base64', 'image_base64'])
 	response_format := (input['response_format'] or { 'url' }).trim_space().to_lower()
 	mut use_base64 := response_format == 'base64'
-	mut sources := if use_base64 { base64_images } else { image_urls }
+	mut sources := if use_base64 { base64_images.clone() } else { image_urls.clone() }
 	if sources.len == 0 {
-		sources = if use_base64 { image_urls } else { base64_images }
+		sources = if use_base64 { image_urls.clone() } else { base64_images.clone() }
 		use_base64 = !use_base64
 	}
 	if sources.len == 0 {
