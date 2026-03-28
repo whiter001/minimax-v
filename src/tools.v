@@ -1,6 +1,7 @@
 module main
 
 import encoding.base64
+import encoding.hex
 import net.http
 import net.smtp
 import os
@@ -1015,6 +1016,32 @@ fn extract_first_json_string_value_with_keys(body string, keys []string) string 
 	return ''
 }
 
+fn extract_json_object_value(json_str string, key string) string {
+	// Lightweight nested-object extraction for response envelopes like {"data": {...}}.
+	pattern := '"${key}"'
+	if idx := json_str.index(pattern) {
+		mut p := idx + pattern.len
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		if p >= json_str.len || json_str[p] != `:` {
+			return ''
+		}
+		p++
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		if p >= json_str.len || json_str[p] != `{` {
+			return ''
+		}
+		end := find_matching_bracket(json_str, p)
+		if end > p {
+			return json_str[p..end + 1]
+		}
+	}
+	return ''
+}
+
 fn extract_first_json_number_value_with_keys(body string, keys []string) string {
 	for key in keys {
 		if body.contains('"${key}"') {
@@ -1319,6 +1346,7 @@ fn summarize_speech_synthesis_response(body string) string {
 	if trimmed.len == 0 {
 		return 'Error: empty speech synthesis response'
 	}
+	// Keep the summary stable across both URL-based and inline-hex API responses.
 	mut lines := ['🔊 语音合成请求已完成']
 	trace_id := extract_first_json_string_value_with_keys(body, ['trace_id'])
 	if trace_id.len > 0 {
@@ -1327,6 +1355,21 @@ fn summarize_speech_synthesis_response(body string) string {
 	task_id := extract_first_json_string_value_with_keys(body, ['id', 'task_id'])
 	if task_id.len > 0 {
 		lines << 'task_id: ${task_id}'
+	}
+	data_object := extract_json_object_value(body, 'data')
+	data_audio := if data_object.len > 0 {
+		extract_json_string_value(data_object, 'audio')
+	} else {
+		''
+	}
+	// Some responses expose a direct audio URL here; others embed hex content.
+	if data_audio.len > 0 {
+		if data_audio.starts_with('http://') || data_audio.starts_with('https://') {
+			lines << 'audio_url:'
+			lines << '- ${data_audio}'
+		} else {
+			lines << 'audio_hex: ${data_audio.len} chars'
+		}
 	}
 	urls := extract_all_json_string_values(body, 'url')
 	audio_urls := extract_all_json_string_values(body, 'audio_url')
@@ -1351,13 +1394,18 @@ fn summarize_speech_synthesis_response(body string) string {
 			collected << url
 		}
 	}
+	// De-duplicate alternate link fields so the CLI output stays readable.
 	if collected.len > 0 {
 		lines << 'audio_url:'
 		for url in collected {
 			lines << '- ${url}'
 		}
 	}
-	hex_chunks := extract_all_json_string_values(body, 'hex')
+	hex_chunks := if data_audio.len > 0 {
+		[data_audio]
+	} else {
+		extract_all_json_string_values(body, 'hex')
+	}
 	if hex_chunks.len > 0 {
 		lines << 'hex_chunks: ${hex_chunks.len}'
 		for i, chunk in hex_chunks {
@@ -1441,12 +1489,36 @@ fn speech_synthesis_tool(config Config, input map[string]string, workspace strin
 		return summary
 	}
 
+	// Prefer a downloadable URL when the API returns one; fall back to inline audio hex.
 	audio_url := extract_first_json_string_value_with_keys(response_body, ['url', 'audio_url',
 		'download_url'])
-	if audio_url.len == 0 {
-		return 'Error: speech response did not include a downloadable URL'
+	if audio_url.len > 0 {
+		mut resolved_output := resolve_workspace_path(save_path, workspace)
+		if resolved_output.len == 0 {
+			return 'Error: save_path is required'
+		}
+		if os.is_dir(resolved_output) {
+			resolved_output = os.join_path(resolved_output, 'speech_${time.now().unix_milli()}.mp3')
+		}
+		saved_path := download_audio_file(audio_url, resolved_output) or {
+			return 'Error: ${err.msg()}'
+		}
+		if summary.len > 0 {
+			summary += '\n'
+		}
+		summary += 'saved_audio: ${saved_path}'
+		return summary
 	}
 
+	data_object := extract_json_object_value(response_body, 'data')
+	data_audio := if data_object.len > 0 {
+		extract_json_string_value(data_object, 'audio')
+	} else {
+		''
+	}
+	if data_audio.len == 0 {
+		return 'Error: speech response did not include a downloadable URL or audio hex'
+	}
 	mut resolved_output := resolve_workspace_path(save_path, workspace)
 	if resolved_output.len == 0 {
 		return 'Error: save_path is required'
@@ -1454,13 +1526,26 @@ fn speech_synthesis_tool(config Config, input map[string]string, workspace strin
 	if os.is_dir(resolved_output) {
 		resolved_output = os.join_path(resolved_output, 'speech_${time.now().unix_milli()}.mp3')
 	}
-	saved_path := download_audio_file(audio_url, resolved_output) or {
-		return 'Error: ${err.msg()}'
+	if data_audio.starts_with('http://') || data_audio.starts_with('https://') {
+		saved_path := download_audio_file(data_audio, resolved_output) or {
+			return 'Error: ${err.msg()}'
+		}
+		if summary.len > 0 {
+			summary += '\n'
+		}
+		summary += 'saved_audio: ${saved_path}'
+		return summary
+	}
+	decoded := hex.decode(data_audio) or {
+		return 'Error: failed to decode speech audio hex: ${err.msg()}'
+	}
+	os.write_bytes(resolved_output, decoded) or {
+		return 'Error: failed to write audio file: ${err.msg()}'
 	}
 	if summary.len > 0 {
 		summary += '\n'
 	}
-	summary += 'saved_audio: ${saved_path}'
+	summary += 'saved_audio: ${resolved_output}'
 	return summary
 }
 
@@ -1732,6 +1817,7 @@ fn request_file_management_list(api_key string, purpose string) !string {
 	if api_key.trim_space().len == 0 {
 		return error('file management requires an API key')
 	}
+	// File-list is a simple authenticated GET filtered by purpose.
 	mut headers := http.new_header()
 	headers.add(.authorization, 'Bearer ${api_key}')
 	headers.add(.connection, 'close')
@@ -1751,6 +1837,7 @@ fn request_file_management_list(api_key string, purpose string) !string {
 }
 
 fn run_file_management_list_command(config Config, input string) string {
+	// Validate the user-facing command syntax before making the network call.
 	parsed := parse_file_management_list_command(input) or {
 		return 'Error: ${err.msg()}\n${file_management_list_command_usage()}'
 	}
@@ -1765,6 +1852,7 @@ fn run_file_management_list_command(config Config, input string) string {
 }
 
 fn file_management_list_tool(config Config, input map[string]string) string {
+	// Tool-call path shares the same transport and summarization logic as the CLI command.
 	purpose := (input['purpose'] or { '' }).trim_space()
 	if purpose.len == 0 {
 		return 'Error: purpose is required'
