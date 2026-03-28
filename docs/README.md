@@ -14,6 +14,7 @@
 
 1. [api-reference/speech-synthesis.md](api-reference/speech-synthesis.md)：语音合成参考，覆盖同步 T2A 和异步长文本语音生成。
 2. [api-reference/image-generation.md](api-reference/image-generation.md)：图像生成参考，覆盖模型、能力和使用流程。
+3. [api-reference/file-management-list.md](api-reference/file-management-list.md)：文件列出参考，覆盖文件分类、鉴权和响应结构。
 
 ## 文档原则
 
