@@ -459,6 +459,29 @@ fn test_handle_builtin_command_with_client_supports_split_usage() {
 		|| result.contains('Error: speech synthesis requires an API key')
 }
 
+fn test_handle_builtin_command_with_client_shows_file_management_help() {
+	mut client := new_api_client(default_config())
+	result := handle_builtin_command_with_client(mut client, 'files --help')
+	assert result.contains('用法: files list --purpose')
+	assert result.contains('voice_clone')
+}
+
+fn test_parse_file_management_list_command_extracts_purpose() {
+	parsed := parse_file_management_list_command('files list --purpose t2a_async_input') or {
+		panic(err)
+	}
+	assert parsed['purpose'] == 't2a_async_input'
+}
+
+fn test_summarize_file_management_list_response_formats_files() {
+	body := '{"files":[{"file_id":"f1","filename":"demo.txt","purpose":"t2a_async_input","bytes":123,"created_at":456}]}'
+	summary := summarize_file_management_list_response(body)
+	assert summary.contains('files: 1')
+	assert summary.contains('demo.txt')
+	assert summary.contains('id=f1')
+	assert summary.contains('123 bytes')
+}
+
 fn test_get_tools_schema_json_includes_generate_image() {
 	json := get_tools_schema_json()
 	assert json.contains('"name":"generate_image"')
@@ -473,6 +496,24 @@ fn test_get_tools_schema_json_includes_generate_speech() {
 	assert json.contains('"name":"generate_speech"')
 	assert json.contains('"output_format"')
 	assert json.contains('"subtitle_enable"')
+}
+
+fn test_get_tools_schema_json_includes_list_files() {
+	json := get_tools_schema_json()
+	assert json.contains('"name":"list_files"')
+	assert json.contains('"purpose"')
+}
+
+fn test_execute_tool_use_list_files_requires_api_key() {
+	tool := ToolUse{
+		id:    'tu_1'
+		name:  'list_files'
+		input: {
+			'purpose': 't2a_async_input'
+		}
+	}
+	result := execute_tool_use_in_workspace(tool, '', default_config())
+	assert result.contains('file management requires an API key')
 }
 
 fn test_execute_tool_use_unknown() {

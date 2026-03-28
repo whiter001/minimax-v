@@ -15,6 +15,8 @@ const image_generation_supported_models = ['image-01', 'image-01-live']
 const image_generation_supported_response_formats = ['url', 'base64']
 const image_generation_supported_aspect_ratios = ['1:1', '16:9', '4:3', '3:2', '2:3', '3:4', '9:16',
 	'21:9']
+const minimax_file_management_list_api_url = 'https://api.minimaxi.com/v1/files/list'
+const file_management_list_supported_purposes = ['voice_clone', 'prompt_audio', 't2a_async_input']
 const minimax_speech_synthesis_api_urls = ['https://api.minimaxi.com/v1/t2a_v2',
 	'https://api-bj.minimaxi.com/v1/t2a_v2']
 const speech_synthesis_prompt_max_chars = 10000
@@ -1013,6 +1015,200 @@ fn extract_first_json_string_value_with_keys(body string, keys []string) string 
 	return ''
 }
 
+fn extract_first_json_number_value_with_keys(body string, keys []string) string {
+	for key in keys {
+		if body.contains('"${key}"') {
+			return extract_json_number_value(body, key).str()
+		}
+	}
+	return ''
+}
+
+fn extract_json_object_array_strings(json_str string, key string) []string {
+	mut values := []string{}
+	pattern := '"${key}"'
+	if idx := json_str.index(pattern) {
+		mut p := idx + pattern.len
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		if p >= json_str.len || json_str[p] != `:` {
+			return values
+		}
+		p++
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		if p >= json_str.len || json_str[p] != `[` {
+			return values
+		}
+		end := find_matching_bracket(json_str, p)
+		if end < 0 {
+			return values
+		}
+		mut in_string := false
+		mut object_depth := 0
+		mut object_start := -1
+		mut i := p + 1
+		for i < end {
+			ch := json_str[i]
+			if in_string {
+				if ch == `"` && !is_json_quote_escaped(json_str, i) {
+					in_string = false
+				}
+			} else {
+				match ch {
+					`"` {
+						in_string = true
+					}
+					`{` {
+						if object_depth == 0 {
+							object_start = i
+						}
+						object_depth++
+					}
+					`}` {
+						if object_depth > 0 {
+							object_depth--
+							if object_depth == 0 && object_start >= 0 {
+								values << json_str[object_start..i + 1]
+								object_start = -1
+							}
+						}
+					}
+					else {}
+				}
+			}
+			i++
+		}
+	}
+	return values
+}
+
+fn file_management_list_command_usage() string {
+	return '用法: files list --purpose voice_clone|prompt_audio|t2a_async_input\n示例: files list --purpose t2a_async_input'
+}
+
+fn is_file_management_list_command(input string) bool {
+	trimmed := normalize_tool_command(input)
+	if trimmed.len == 0 {
+		return false
+	}
+	head := trimmed.split(' ')[0].to_lower()
+	return head in ['file', 'files']
+}
+
+fn parse_file_management_list_command(input string) !map[string]string {
+	normalized := normalize_tool_command(input)
+	if normalized.len == 0 {
+		return error('file management command is empty')
+	}
+	tokens := normalized.split(' ')
+	if tokens.len == 0 {
+		return error('file management command is empty')
+	}
+	command_name := tokens[0].to_lower()
+	if command_name !in ['file', 'files'] {
+		return error('not a file management command')
+	}
+
+	mut result := map[string]string{}
+	if tokens.len == 1 {
+		result['__help__'] = 'true'
+		return result
+	}
+	if tokens.len == 2 && tokens[1].to_lower() in ['--help', '-h'] {
+		result['__help__'] = 'true'
+		return result
+	}
+	if tokens[1].to_lower() != 'list' {
+		return error('unsupported subcommand "${tokens[1]}". Use: files list')
+	}
+
+	mut i := 2
+	for i < tokens.len {
+		token := tokens[i]
+		match token {
+			'--help', '-h' {
+				result['__help__'] = 'true'
+				return result
+			}
+			'--purpose' {
+				if i + 1 >= tokens.len {
+					return error('missing value for --purpose')
+				}
+				result['purpose'] = tokens[i + 1]
+				i += 2
+				continue
+			}
+			else {
+				if token.starts_with('--purpose=') {
+					result['purpose'] = token.all_after('=')
+					i++
+					continue
+				}
+				if token.starts_with('--') {
+					return error('unknown option "${token}"')
+				}
+				return error('unexpected argument "${token}"')
+			}
+		}
+	}
+
+	purpose := (result['purpose'] or { '' }).trim_space()
+	if purpose.len == 0 {
+		return error('purpose is required')
+	}
+	if purpose !in file_management_list_supported_purposes {
+		return error('unsupported purpose "${purpose}". Use voice_clone, prompt_audio, or t2a_async_input')
+	}
+	return result
+}
+
+fn summarize_file_management_list_response(body string) string {
+	trimmed := body.trim_space()
+	if trimmed.len == 0 {
+		return 'Error: empty file management response'
+	}
+	mut lines := ['📁 文件列出请求已完成']
+	files := extract_json_object_array_strings(body, 'files')
+	if files.len == 0 {
+		if trimmed.contains('"files":[]') || trimmed.contains('"files": []') {
+			lines << 'files: 0'
+		} else {
+			lines << 'raw_response:'
+			lines << utf8_safe_truncate(trimmed, 4000)
+		}
+		return lines.join('\n')
+	}
+	lines << 'files: ${files.len}'
+	for file in files {
+		file_id := extract_first_json_string_value_with_keys(file, ['file_id'])
+		filename := extract_first_json_string_value_with_keys(file, ['filename'])
+		purpose := extract_first_json_string_value_with_keys(file, ['purpose'])
+		bytes := extract_first_json_number_value_with_keys(file, ['bytes'])
+		created_at := extract_first_json_number_value_with_keys(file, ['created_at'])
+		mut parts := []string{}
+		if filename.len > 0 {
+			parts << filename
+		}
+		if file_id.len > 0 {
+			parts << 'id=${file_id}'
+		}
+		if purpose.len > 0 {
+			parts << 'purpose=${purpose}'
+		}
+		if bytes.len > 0 {
+			parts << '${bytes} bytes'
+		}
+		if created_at.len > 0 {
+			parts << 'created_at=${created_at}'
+		}
+		lines << '- ${parts.join(' | ')}'
+	}
+	return lines.join('\n')
+}
+
 fn build_optional_raw_json_field(input map[string]string, key string) !string {
 	raw := (input[key] or { '' }).trim_space()
 	if raw.len == 0 {
@@ -1532,7 +1728,57 @@ fn run_speech_synthesis_command(mut client ApiClient, input string) string {
 	return speech_synthesis_tool(client.config, normalized, client.workspace)
 }
 
+fn request_file_management_list(api_key string, purpose string) !string {
+	if api_key.trim_space().len == 0 {
+		return error('file management requires an API key')
+	}
+	mut headers := http.new_header()
+	headers.add(.authorization, 'Bearer ${api_key}')
+	headers.add(.connection, 'close')
+	url := '${minimax_file_management_list_api_url}?purpose=${purpose}'
+	mut req := http.Request{
+		method:        .get
+		url:           url
+		header:        headers
+		read_timeout:  60 * time.second
+		write_timeout: 60 * time.second
+	}
+	response := req.do() or { return error('file management request failed: ${err}') }
+	if response.status_code != 200 {
+		return error('file management API ${response.status_code}: ${response.body}')
+	}
+	return response.body
+}
+
+fn run_file_management_list_command(config Config, input string) string {
+	parsed := parse_file_management_list_command(input) or {
+		return 'Error: ${err.msg()}\n${file_management_list_command_usage()}'
+	}
+	if (parsed['__help__'] or { '' }).trim_space().len > 0 {
+		return file_management_list_command_usage()
+	}
+	purpose := (parsed['purpose'] or { '' }).trim_space()
+	response_body := request_file_management_list(config.api_key, purpose) or {
+		return 'Error: ${err.msg()}'
+	}
+	return summarize_file_management_list_response(response_body)
+}
+
+fn file_management_list_tool(config Config, input map[string]string) string {
+	purpose := (input['purpose'] or { '' }).trim_space()
+	if purpose.len == 0 {
+		return 'Error: purpose is required'
+	}
+	response_body := request_file_management_list(config.api_key, purpose) or {
+		return 'Error: ${err.msg()}'
+	}
+	return summarize_file_management_list_response(response_body)
+}
+
 fn handle_builtin_command_with_client(mut client ApiClient, input string) string {
+	if is_file_management_list_command(input) {
+		return run_file_management_list_command(client.config, input)
+	}
 	if is_speech_synthesis_command(input) {
 		return run_speech_synthesis_command(mut client, input)
 	}
@@ -3365,6 +3611,7 @@ fn get_available_tools() []ToolDefinition {
 		ToolDefinition{'session_note', '持久化记忆 - read/write/append 跨会话笔记'},
 		ToolDefinition{'update_working_checkpoint', '短期工作记忆 - 记录进度/约束/SOP'},
 		ToolDefinition{'todo_manager', '任务管理 - list/set/add/update/clear'},
+		ToolDefinition{'list_files', '文件管理 - 列出官方文件管理 API 中指定 purpose 的文件'},
 		ToolDefinition{'send_mail', '发送邮件 - 需 smtp 服务器和账号密码'},
 		ToolDefinition{'generate_image', '文生图 - 调用 MiniMax 图像生成 API（支持参考图和本地保存）'},
 		ToolDefinition{'generate_speech', '文生音频 - 调用 MiniMax 语音合成 API'},
@@ -3720,6 +3967,7 @@ fn get_tools_schema_json() string {
 		'{"name":"ask_user","description":"Ask the user a question to clarify requirements, get preferences, or request missing information. The user\'s response will be returned. Use this when you need more context or the task is ambiguous.","input_schema":{"type":"object","properties":{"question":{"type":"string","description":"The question to ask the user"}},"required":["question"]}},' +
 		'{"name":"update_working_checkpoint","description":"Maintain short-term working memory for long tasks. Store key constraints, progress, pitfalls, and related SOP names for later rounds.","input_schema":{"type":"object","properties":{"key_info":{"type":"string","description":"Compact working notes: requirements, progress, pitfalls, and next step."},"related_sop":{"type":"string","description":"Related SOP names or paths."}},"required":[]}},' +
 		'{"name":"todo_manager","description":"Manage a TODO task list to track progress on multi-step work. Actions: list (show all tasks), set (replace entire list from text, one task per line), add (add a task), update (change task status by id), clear (remove all tasks). Statuses: pending, in-progress, done.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"The action: list, set, add, update, or clear","enum":["list","set","add","update","clear"]},"title":{"type":"string","description":"Task title (for add) or full task list text (for set, one task per line)"},"id":{"type":"integer","description":"Task ID (for update)"},"status":{"type":"string","description":"New status for update: pending, in-progress, or done"}},"required":["action"]}},' +
+		'{"name":"list_files","description":"List files from the official MiniMax file management API by purpose. Supported purposes: voice_clone, prompt_audio, t2a_async_input.","input_schema":{"type":"object","properties":{"purpose":{"type":"string","description":"File purpose to filter by","enum":["voice_clone","prompt_audio","t2a_async_input"]}},"required":["purpose"]}},' +
 		'{"name":"read_many_files","description":"Read multiple files at once. Supports comma-separated file paths and glob patterns (e.g. *.v, src/*.ts). Returns the concatenated contents of all matched files. Max 20 files per call.","input_schema":{"type":"object","properties":{"paths":{"type":"string","description":"Comma-separated file paths or glob patterns (e.g. src/main.v,src/tools.v or src/*.v)"}},"required":["paths"]}},' +
 		'{"name":"activate_skill","description":"Activate a specialized skill to gain expert-level instructions for a specific domain. This loads the full skill prompt into your context. Use this when the task would benefit from specialized expertise. Call with the skill name.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"The name of the skill to activate (e.g. coder, reviewer, architect, debugger)"}},"required":["name"]}},' +
 		'{"name":"cron","description":"Manage cron scheduled tasks. Actions: create (add a cron job), create_once (add a one-time delayed job), list, show, delete, enable, disable, stats, log, run_now (execute immediately), daemon (start/stop/restart/status). When creating a job, if no daemon is running it will be auto-started.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: create, create_once, list, show, delete, enable, disable, stats, log, run_now, daemon, status"},"name":{"type":"string","description":"Job name (for create, create_once, delete, enable, disable)"},"schedule":{"type":"string","description":"Cron expression like */5 * * * * (for create)"},"delay_seconds":{"type":"integer","description":"Delay in seconds (for create_once)"},"command":{"type":"string","description":"Command to execute when job runs"},"job_id":{"type":"string","description":"Job ID (for show, delete, enable, disable, log, run_now)"},"daemon_action":{"type":"string","description":"Daemon sub-action: start, stop, restart, status (for daemon action)"}},"required":["action"]}},' +
@@ -3892,6 +4140,9 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 			status := tool.input['status'] or { '' }
 			return todo_manager_tool(action, '', id, title, status)
 		}
+		'list_files' {
+			return file_management_list_tool(config, tool.input)
+		}
 		'read_many_files' {
 			paths := tool.input['paths'] or { '' }
 			return read_many_files_tool(paths, workspace)
@@ -3970,7 +4221,8 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string,
 		'run_command', 'mouse_control', 'keyboard_control', 'capture_screen', 'match_sop',
 		'record_experience', 'session_note', 'task_done', 'grep_search', 'find_files',
 		'sequentialthinking', 'json_edit', 'ask_user', 'update_working_checkpoint', 'todo_manager',
-		'read_many_files', 'activate_skill', 'cron', 'generate_image', 'generate_speech', 'send_mail']
+		'read_many_files', 'activate_skill', 'cron', 'list_files', 'generate_image',
+		'generate_speech', 'send_mail']
 	if tool.name in builtin_names {
 		return execute_tool_use_in_workspace(tool, workspace, config)
 	}

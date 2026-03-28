@@ -435,6 +435,7 @@ fn build_help_text() string {
 		'  commands / commands list       列出可用自定义命令',
 		'  commands show <name>           查看命令模板详情',
 		'  commands reload                重新加载命令目录',
+		'  files list --purpose <purpose> 列出官方文件管理 API 的文件',
 		'  extensions list                列出已安装扩展',
 		'  extensions show <name>         查看扩展详情',
 		'  extensions install <path|git>  从本地目录或 Git 安装扩展',

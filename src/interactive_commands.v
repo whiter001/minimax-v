@@ -152,6 +152,11 @@ fn handle_interactive_exact_command(mut client ApiClient, trimmed string) Intera
 			println('')
 			return .continue_loop
 		}
+		'files', 'file' {
+			println('用法: files list --purpose voice_clone|prompt_audio|t2a_async_input')
+			println('')
+			return .continue_loop
+		}
 		'speech', 'tts' {
 			println('用法: speech --text <文本> [--model MODEL] [--output-format url|hex] [--voice-id ID] [--speed N] [--volume N] [--pitch N] [--save-path PATH]')
 			println('也可以使用: tts --text <文本> ...')
