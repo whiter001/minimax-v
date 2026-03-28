@@ -1116,6 +1116,19 @@ fn file_management_list_command_usage() string {
 	return '用法: files list --purpose voice_clone|prompt_audio|t2a_async_input\n示例: files list --purpose t2a_async_input'
 }
 
+// 生成统一的“查看完整用法”提示，避免各命令重复拼接相同文案。
+fn command_help_hint(command string) string {
+	if command.trim_space().len == 0 {
+		return ''
+	}
+	return '\n提示: 输入 ${command} --help 查看完整用法'
+}
+
+// 将语法错误包装成“错误 + 用法 + 帮助提示”，方便用户和 AI 直接回到正确入口。
+fn command_usage_error(message string, usage string, command string) string {
+	return 'Error: ${message}\n${usage}${command_help_hint(command)}'
+}
+
 fn is_file_management_list_command(input string) bool {
 	trimmed := normalize_tool_command(input)
 	if trimmed.len == 0 {
@@ -1754,7 +1767,7 @@ fn derive_speech_chunk_save_path(base_save_path string, chunk_index int, chunk_c
 
 fn run_speech_synthesis_split_command(mut client ApiClient, input map[string]string) string {
 	text := load_speech_synthesis_command_text(input, client.workspace) or {
-		return 'Error: ${err.msg()}'
+		return command_usage_error(err.msg(), speech_synthesis_command_usage(), 'speech')
 	}
 	chunk_size := parse_int_input(input, 'chunk_size', speech_synthesis_prompt_max_chars)
 	mut effective_chunk_size := chunk_size
@@ -1763,7 +1776,8 @@ fn run_speech_synthesis_split_command(mut client ApiClient, input map[string]str
 	}
 	chunks := split_speech_text_into_chunks(text, effective_chunk_size)
 	if chunks.len == 0 {
-		return 'Error: text is required'
+		return command_usage_error('text is required', speech_synthesis_command_usage(),
+			'speech')
 	}
 	if chunks.len == 1 {
 		mut single_input := input.clone()
@@ -1791,8 +1805,9 @@ fn run_speech_synthesis_split_command(mut client ApiClient, input map[string]str
 }
 
 fn run_speech_synthesis_command(mut client ApiClient, input string) string {
+	// 先解析用户输入；参数错误时直接返回用法和帮助提示，避免继续执行。
 	parsed := parse_speech_synthesis_command(input) or {
-		return 'Error: ${err.msg()}\n${speech_synthesis_command_usage()}'
+		return command_usage_error(err.msg(), speech_synthesis_command_usage(), 'speech')
 	}
 	if (parsed['__help__'] or { '' }).trim_space().len > 0 {
 		return speech_synthesis_command_usage()
@@ -1807,7 +1822,7 @@ fn run_speech_synthesis_command(mut client ApiClient, input string) string {
 		}
 	}
 	text := load_speech_synthesis_command_text(normalized, client.workspace) or {
-		return 'Error: ${err.msg()}\n${speech_synthesis_command_usage()}'
+		return command_usage_error(err.msg(), speech_synthesis_command_usage(), 'speech')
 	}
 	normalized['text'] = text
 	return speech_synthesis_tool(client.config, normalized, client.workspace)
@@ -1837,9 +1852,9 @@ fn request_file_management_list(api_key string, purpose string) !string {
 }
 
 fn run_file_management_list_command(config Config, input string) string {
-	// Validate the user-facing command syntax before making the network call.
+	// 先校验命令语法；失败时直接返回用法和帮助提示，避免发起网络请求。
 	parsed := parse_file_management_list_command(input) or {
-		return 'Error: ${err.msg()}\n${file_management_list_command_usage()}'
+		return command_usage_error(err.msg(), file_management_list_command_usage(), 'files')
 	}
 	if (parsed['__help__'] or { '' }).trim_space().len > 0 {
 		return file_management_list_command_usage()

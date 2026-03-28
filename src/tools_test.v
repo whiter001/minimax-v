@@ -439,6 +439,12 @@ fn test_split_speech_text_into_chunks_keeps_content_order() {
 	}
 }
 
+fn test_derive_speech_chunk_save_path_appends_chunk_suffix() {
+	base := os.join_path('/tmp', '__minimax_speech__', 'out.mp3')
+	result := derive_speech_chunk_save_path(base, 0, 3, '')
+	assert result == os.join_path('/tmp', '__minimax_speech__', 'out_1_of_3.mp3')
+}
+
 fn test_handle_builtin_command_with_client_routes_speech_command() {
 	mut client := new_api_client(default_config())
 	result := handle_builtin_command_with_client(mut client, 'speech --text hello world')
@@ -457,6 +463,28 @@ fn test_handle_builtin_command_with_client_supports_split_usage() {
 	result := handle_builtin_command_with_client(mut client, 'speech --split --text abcdefghijklmnopqrstuvwxyz')
 	assert result.contains('speech synthesis requires an API key')
 		|| result.contains('Error: speech synthesis requires an API key')
+}
+
+fn test_handle_builtin_command_with_client_shows_speech_usage_on_missing_text_file() {
+	mut client := new_api_client(default_config())
+	result := handle_builtin_command_with_client(mut client, 'speech --split --text-file /tmp/__minimax_missing_speech_input__.txt')
+	assert result.contains('用法: speech')
+	assert result.contains('提示: 输入 speech --help')
+}
+
+fn test_handle_builtin_command_with_client_shows_speech_usage_on_empty_split_text() {
+	test_path := '/tmp/__minimax_empty_speech_input__.txt'
+	os.write_file(test_path, '   \n\t') or {
+		assert false
+		return
+	}
+	written := os.read_file(test_path) or { '' }
+	assert written == '   \n\t'
+	defer { os.rm(test_path) or {} }
+	mut client := new_api_client(default_config())
+	result := handle_builtin_command_with_client(mut client, 'speech --split --text-file ${test_path}')
+	assert result.contains('用法: speech')
+	assert result.contains('text is required')
 }
 
 fn test_handle_builtin_command_with_client_shows_file_management_help() {

@@ -224,6 +224,7 @@ v -enable-globals test src/
 ./tests/check_vfmt.sh
 ./integration_test.sh
 ./comprehensive_test.sh
+./tests/verify_speech_synthesis.sh [--with-api]
 ```
 
 如果需要启用 Git hooks：
@@ -236,6 +237,8 @@ bash scripts/install-git-hooks.sh
 
 - pre-commit 运行 tests/check_vfmt.sh
 - pre-push 运行 build.sh 和 v -enable-globals test src/
+
+语音合成验证脚本会从同一个 `~/.config/minimax/config` 读取 `api_key`，并用这把 key 依次验证多个模型的短文本合成与分段输出。
 
 ## 前置依赖
 
