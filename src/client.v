@@ -60,6 +60,8 @@ fn is_tool_error_result(result string) bool {
 }
 
 fn is_stream_transport_error(err_msg string) bool {
+	// Only treat low-level transport failures as stream-specific; API and parse errors
+	// should still go through the normal retry path.
 	lower := err_msg.to_lower()
 	transport_signals := [
 		'response does not start with http/',
@@ -1546,6 +1548,12 @@ fn (mut c ApiClient) chat(prompt string) !string {
 	mut last_failed_bash_command := ''
 	mut failed_bash_command_streak := 0
 	mut total_retries_in_task := 0 // Track total retries for self-correction mechanism
+	// Store the user's streaming preference so any internal retries can restore it later.
+	mut original_use_streaming := c.use_streaming
+	defer {
+		c.use_streaming = original_use_streaming
+	}
+	// Once transport failures show up, disable forced streaming only for the remainder of this task.
 	mut streaming_disabled_for_task := false
 	mut execution := new_agent_execution(prompt)
 	c.trajectory.start_recording(prompt, c.model)
@@ -1576,11 +1584,15 @@ fn (mut c ApiClient) chat(prompt string) !string {
 		if c.use_streaming || force_stream {
 			mut stream_body := body_json
 			if force_stream {
+				// Force one internal streaming pass so the tool loop can stay resilient,
+				// but do not change the caller's long-lived preference permanently.
 				c.use_streaming = true
 				stream_body = c.build_request_json()
 			}
 			c.logger.log_request(c.model, c.messages.len, true, true)
 			mut sr := StreamResult{}
+			// Failed streaming can either mean a transient transport problem or a normal
+			// request error; only the first case should permanently disable forced streaming.
 			mut fallback_to_non_streaming := false
 			if force_stream {
 				sr = c.send_streaming_request_silent(stream_body) or {

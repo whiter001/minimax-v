@@ -663,7 +663,21 @@ fn image_generation_tool(config Config, input map[string]string, workspace strin
 		read_timeout:  180 * time.second
 		write_timeout: 60 * time.second
 	}
-	response := req.do() or { return 'Error: image generation request failed: ${err}' }
+	// Keep the normal V HTTP path first, but fall back to curl when the client stack
+	// cannot complete the request even though the API itself is reachable.
+	mut response := req.do() or {
+		fallback_body := request_image_generation_via_curl(config.api_key, request_body) or {
+			return 'Error: image generation request failed: ${err}'
+		}
+		// Reuse the same downstream parsing logic after the fallback succeeds.
+		http.Response{
+			body:         fallback_body
+			header:       http.Header{}
+			http_version: 'HTTP/1.1'
+			status_code:  200
+			status_msg:   'OK'
+		}
+	}
 	if response.status_code != 200 {
 		return 'Error: image generation API ${response.status_code}: ${response.body}'
 	}
@@ -672,8 +686,8 @@ fn image_generation_tool(config Config, input map[string]string, workspace strin
 		return summary
 	}
 
-	image_urls := extract_json_values_for_keys(response.body, ['url', 'image_url', 'download_url'])
-	base64_images := extract_json_values_for_keys(response.body, ['base64', 'image_base64'])
+	image_urls := extract_json_values_for_keys(response.body, ['url', 'image_url', 'download_url', 'data.url', 'data.image_url'])
+	base64_images := extract_json_values_for_keys(response.body, ['base64', 'image_base64', 'data.base64', 'data.image_base64'])
 	response_format := (input['response_format'] or { 'url' }).trim_space().to_lower()
 	mut use_base64 := response_format == 'base64'
 	mut sources := if use_base64 { base64_images.clone() } else { image_urls.clone() }
@@ -731,6 +745,39 @@ fn image_generation_tool(config Config, input map[string]string, workspace strin
 		}
 	}
 	return summary
+}
+
+// Uses curl as a fallback path when the V HTTP client cannot talk to the image API.
+fn request_image_generation_via_curl(api_key string, request_body string) !string {
+	stamp := time.now().unix_milli()
+	// Curl reads the request body from disk so we can preserve the exact JSON payload.
+	tmp_request := os.join_path(os.temp_dir(), 'minimax_image_generation_${stamp}.json')
+	// The response body is also captured to disk because curl only prints the status code.
+	tmp_response := os.join_path(os.temp_dir(), 'minimax_image_generation_${stamp}.body')
+	os.write_file(tmp_request, request_body) or {
+		return error('failed to write fallback request body: ${err.msg()}')
+	}
+	defer {
+		os.rm(tmp_request) or {}
+		os.rm(tmp_response) or {}
+	}
+
+	command := 'curl --silent --show-error --http1.1 --output ${shell_escape(tmp_response)} --write-out %{http_code} -X POST ${shell_escape(minimax_image_generation_api_url)} -H ${shell_escape('Authorization: Bearer ${api_key}')} -H ${shell_escape('Content-Type: application/json')} --data-binary @${shell_escape(tmp_request)}'
+	result := os.execute(command)
+	if result.exit_code != 0 {
+		return error('curl fallback failed: ${result.output.trim_space()}')
+	}
+
+	code := result.output.trim_space()
+	body := os.read_file(tmp_response) or {
+		return error('failed to read curl fallback response: ${err.msg()}')
+	}
+	status_code := code.int()
+	// Preserve the API contract by rejecting non-200 responses before parsing body content.
+	if status_code != 200 {
+		return error('image generation API ${status_code}: ${body}')
+	}
+	return body
 }
 
 fn extract_all_json_string_values(json_str string, key string) []string {
@@ -2379,22 +2426,27 @@ fn auto_checkpoint_before_modify(filepath string, workspace string) {
 }
 
 // --- TODO Task Manager ---
-// AI-managed task list for tracking subtask progress
+// AI-managed task list for tracking subtask progress.
 
+// TodoItem is the persisted representation of a single task.
 struct TodoItem {
 	id     int
 	title  string
-	status string // 'pending', 'in-progress', 'done'
+	status string // Normalized lifecycle state: pending, in-progress, or done.
 }
 
+// TodoManager owns the in-memory task list used by the TODO tool.
 struct TodoManager {
 mut:
 	items []TodoItem
 }
 
+// Shared task state is loaded lazily because TODO tools are optional.
 __global todo_mgr = TodoManager{}
+// Prevents repeated disk reads once the task list has been hydrated.
 __global todo_mgr_loaded = false
 
+// Returns the on-disk location used to persist TODO items across sessions.
 fn get_todo_store_path() string {
 	config_dir := get_minimax_config_dir()
 	if !os.is_dir(config_dir) {
@@ -2403,10 +2455,12 @@ fn get_todo_store_path() string {
 	return os.join_path(config_dir, 'todos.db.txt')
 }
 
+// Normalizes a task title so stored records stay single-line and parseable.
 fn sanitize_todo_title(title string) string {
 	return title.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ').trim_space()
 }
 
+// Maps free-form status text to the small set of supported task states.
 fn normalize_todo_status(status string) string {
 	normalized := status.trim_space().to_lower().replace('_', '-')
 	return match normalized {
@@ -2415,6 +2469,7 @@ fn normalize_todo_status(status string) string {
 	}
 }
 
+// Allocates the next monotonically increasing TODO id.
 fn next_todo_id() int {
 	mut max_id := 0
 	for item in todo_mgr.items {
@@ -2425,6 +2480,7 @@ fn next_todo_id() int {
 	return max_id + 1
 }
 
+// Loads persisted TODO items once and ignores malformed records instead of failing.
 fn todo_manager_load_once() {
 	if todo_mgr_loaded {
 		return
@@ -2463,9 +2519,12 @@ fn todo_manager_load_once() {
 			status: status
 		}
 	}
+	// Keep the task list stable even if the backing file was edited manually.
+	loaded.sort(a.id < b.id)
 	todo_mgr.items = loaded
 }
 
+// Writes the current TODO list back to disk using the same compact text format.
 fn save_todo_manager_state() ! {
 	path := get_todo_store_path()
 	mut lines := []string{}
@@ -2480,11 +2539,13 @@ fn save_todo_manager_state() ! {
 	os.write_file(path, lines.join('\n'))!
 }
 
+// Converts persistence failures into user-visible tool output.
 fn persist_todo_manager_state() string {
 	save_todo_manager_state() or { return 'Error: Failed to persist TODO list: ${err.msg()}' }
 	return ''
 }
 
+// Central dispatcher for TODO list operations used by the tool layer.
 fn todo_manager_tool(action string, items_json string, id int, title string, status string) string {
 	todo_manager_load_once()
 	match action {
@@ -2555,6 +2616,7 @@ fn todo_manager_tool(action string, items_json string, id int, title string, sta
 	}
 }
 
+// Parses a newline-delimited TODO payload and replaces the current list.
 fn todo_set_from_text(text string) string {
 	lines := text.split('\n')
 	todo_mgr.items = []
@@ -2585,6 +2647,7 @@ fn todo_set_from_text(text string) string {
 	return '✅ Set ${count} TODO items\n${todo_list_items()}'
 }
 
+// Renders the TODO list in a compact, human-friendly format.
 fn todo_list_items() string {
 	todo_manager_load_once()
 	if todo_mgr.items.len == 0 {
