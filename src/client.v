@@ -59,6 +59,24 @@ fn is_tool_error_result(result string) bool {
 	return result.starts_with('Error:') || result.starts_with('Exit code:')
 }
 
+fn is_stream_transport_error(err_msg string) bool {
+	lower := err_msg.to_lower()
+	transport_signals := [
+		'response does not start with http/',
+		'unexpected eof',
+		'connection reset by peer',
+		'broken pipe',
+		'connection refused',
+		'invalid http response',
+	]
+	for signal in transport_signals {
+		if lower.contains(signal) {
+			return true
+		}
+	}
+	return false
+}
+
 fn normalize_tool_command(command string) string {
 	if command.trim_space().len == 0 {
 		return ''
@@ -1528,6 +1546,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 	mut last_failed_bash_command := ''
 	mut failed_bash_command_streak := 0
 	mut total_retries_in_task := 0 // Track total retries for self-correction mechanism
+	mut streaming_disabled_for_task := false
 	mut execution := new_agent_execution(prompt)
 	c.trajectory.start_recording(prompt, c.model)
 
@@ -1553,7 +1572,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 
 		// When tool rounds are in progress, use streaming internally for reliability.
 		// The MiniMax API closes non-streaming connections unreliably for multi-round requests.
-		force_stream := !c.use_streaming && tool_rounds > 0
+		force_stream := !streaming_disabled_for_task && !c.use_streaming && tool_rounds > 0
 		if c.use_streaming || force_stream {
 			mut stream_body := body_json
 			if force_stream {
@@ -1562,28 +1581,43 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			}
 			c.logger.log_request(c.model, c.messages.len, true, true)
 			mut sr := StreamResult{}
+			mut fallback_to_non_streaming := false
 			if force_stream {
 				sr = c.send_streaming_request_silent(stream_body) or {
-					c.use_streaming = false
-					consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
-						consecutive_errors, 'streaming request failed', err.str()) or { return err }
-					continue
+					if is_stream_transport_error(err.str()) {
+						streaming_disabled_for_task = true
+						c.use_streaming = false
+						fallback_to_non_streaming = true
+						c.logger.log_error('API', 'stream transport error detected, disabling streaming for this task: ${err.str()}')
+						StreamResult{}
+					} else {
+						c.use_streaming = false
+						consecutive_errors = c.handle_chat_request_retry(mut step, mut
+							execution, consecutive_errors, 'streaming request failed',
+							err.str()) or { return err }
+						continue
+					}
 				}
-				c.use_streaming = false
+				if !fallback_to_non_streaming {
+					c.use_streaming = false
+				}
 			} else {
 				sr = c.send_streaming_request(stream_body) or {
-					consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
-						consecutive_errors, 'streaming request failed', err.str()) or { return err }
-					continue
+					if is_stream_transport_error(err.str()) {
+						streaming_disabled_for_task = true
+						c.use_streaming = false
+						fallback_to_non_streaming = true
+						c.logger.log_error('API', 'stream transport error detected, disabling streaming for this task: ${err.str()}')
+						StreamResult{}
+					} else {
+						consecutive_errors = c.handle_chat_request_retry(mut step, mut
+							execution, consecutive_errors, 'streaming request failed',
+							err.str()) or { return err }
+						continue
+					}
 				}
 			}
-			parsed = build_parsed_response_from_stream_result(sr)
-			if force_stream && parsed.stop_reason.len == 0 && parsed.text.len == 0
-				&& parsed.tool_uses.len == 0 {
-				if c.debug && !c.silent_mode {
-					println('[DEBUG] 强制流式返回空响应，回退非流式重试...')
-				}
-				c.logger.log_error('API', 'forced streaming returned empty parsed response, retrying non-streaming')
+			if fallback_to_non_streaming {
 				c.logger.log_request(c.model, c.messages.len, true, false)
 				response_body := c.send_api_request(body_json) or {
 					consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
@@ -1591,6 +1625,24 @@ fn (mut c ApiClient) chat(prompt string) !string {
 					continue
 				}
 				parsed = c.parse_non_streaming_response(response_body)
+			} else {
+				parsed = build_parsed_response_from_stream_result(sr)
+				if force_stream && parsed.stop_reason.len == 0 && parsed.text.len == 0
+					&& parsed.tool_uses.len == 0 {
+					if c.debug && !c.silent_mode {
+						println('[DEBUG] 强制流式返回空响应，回退非流式重试...')
+					}
+					c.logger.log_error('API', 'forced streaming returned empty parsed response, retrying non-streaming')
+					c.logger.log_request(c.model, c.messages.len, true, false)
+					response_body := c.send_api_request(body_json) or {
+						consecutive_errors = c.handle_chat_request_retry(mut step, mut
+							execution, consecutive_errors, 'request failed', err.str()) or {
+							return err
+						}
+						continue
+					}
+					parsed = c.parse_non_streaming_response(response_body)
+				}
 			}
 		} else {
 			c.logger.log_request(c.model, c.messages.len, true, false)
