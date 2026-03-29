@@ -248,7 +248,7 @@ fn test_send_mail_tool_validates_required_smtp_fields() {
 fn test_build_image_generation_request_json_defaults() {
 	body := build_image_generation_request_json({
 		'prompt': 'a red fox'
-	}) or {
+	}, 'image-01') or {
 		assert false
 		return
 	}
@@ -258,6 +258,16 @@ fn test_build_image_generation_request_json_defaults() {
 	assert body.contains('"n":1')
 	assert body.contains('"prompt_optimizer":false')
 	assert body.contains('"aigc_watermark":false')
+}
+
+fn test_build_image_generation_request_json_uses_default_model_when_missing() {
+	body := build_image_generation_request_json({
+		'prompt': 'a red fox'
+	}, 'image-01-live') or {
+		assert false
+		return
+	}
+	assert body.contains('"model":"image-01-live"')
 }
 
 fn test_build_image_generation_request_json_with_options() {
@@ -274,7 +284,7 @@ fn test_build_image_generation_request_json_with_options() {
 		'aigc_watermark':       'true'
 		'reference_image_url':  'https://example.com/reference.png'
 		'reference_image_type': 'character'
-	}) or {
+	}, 'image-01') or {
 		assert false
 		return
 	}
@@ -294,11 +304,24 @@ fn test_build_image_generation_request_json_with_raw_subject_reference() {
 	body := build_image_generation_request_json({
 		'prompt':            'a portrait'
 		'subject_reference': '[{"type":"character","image_file":"https://example.com/ref.png"}]'
-	}) or {
+	}, 'image-01') or {
 		assert false
 		return
 	}
 	assert body.contains('"subject_reference":[{"type":"character","image_file":"https://example.com/ref.png"}]')
+}
+
+fn test_build_image_generation_request_json_live_model_supports_style() {
+	body := build_image_generation_request_json({
+		'prompt': 'a watercolor fox'
+		'model':  'image-01-live'
+		'style':  'watercolor'
+	}, 'image-01') or {
+		assert false
+		return
+	}
+	assert body.contains('"model":"image-01-live"')
+	assert body.contains('"style":"watercolor"')
 }
 
 fn test_build_speech_synthesis_request_json_defaults() {

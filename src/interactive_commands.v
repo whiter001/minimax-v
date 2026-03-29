@@ -22,8 +22,10 @@ fn handle_interactive_exact_command(mut client ApiClient, trimmed string) Intera
 		'config' {
 			println('⚙️  当前配置:')
 			println('  model: ${client.model}')
+			println('  image_model: ${client.config.image_model}')
 			println('  temperature: ${client.temperature}')
 			println('  max_tokens: ${client.max_tokens}')
+			println('  image_api_url: ${client.config.image_api_url}')
 			println('  streaming: ${client.use_streaming}')
 			println('  enable_tools: ${client.enable_tools}')
 			println('  enable_desktop_control: ${client.enable_desktop_control}')

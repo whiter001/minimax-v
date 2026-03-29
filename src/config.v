@@ -26,7 +26,9 @@ pub struct Config {
 pub mut:
 	api_key                string
 	api_url                string
+	image_api_url          string
 	model                  string
+	image_model            string
 	temperature            f64
 	max_tokens             i32
 	max_rounds             int
@@ -58,7 +60,9 @@ fn default_config() Config {
 	return Config{
 		api_key:                ''
 		api_url:                'https://api.minimaxi.com/anthropic/v1/messages'
+		image_api_url:          'https://api.minimaxi.com/v1/image_generation'
 		model:                  'MiniMax-M2.7'
+		image_model:            'image-01'
 		temperature:            0.7
 		max_tokens:             102400
 		max_rounds:             5000
@@ -160,8 +164,14 @@ fn parse_config_content(content string, base Config) Config {
 				'api_url' {
 					config.api_url = val
 				}
+				'image_api_url' {
+					config.image_api_url = val
+				}
 				'model' {
 					config.model = val
+				}
+				'image_model' {
+					config.image_model = val
 				}
 				'temperature' {
 					if temp := strconv.atof64(val) {
@@ -278,8 +288,14 @@ fn apply_env_overrides(mut config Config) {
 	if url := os.getenv_opt('MINIMAX_API_URL') {
 		apply_env_override(mut config, 'MINIMAX_API_URL', url)
 	}
+	if url := os.getenv_opt('MINIMAX_IMAGE_API_URL') {
+		apply_env_override(mut config, 'MINIMAX_IMAGE_API_URL', url)
+	}
 	if key := os.getenv_opt('MINIMAX_MODEL') {
 		apply_env_override(mut config, 'MINIMAX_MODEL', key)
+	}
+	if key := os.getenv_opt('MINIMAX_IMAGE_MODEL') {
+		apply_env_override(mut config, 'MINIMAX_IMAGE_MODEL', key)
 	}
 	if temp := os.getenv_opt('MINIMAX_TEMPERATURE') {
 		apply_env_override(mut config, 'MINIMAX_TEMPERATURE', temp)
@@ -366,8 +382,14 @@ fn apply_env_override(mut config Config, key string, value string) {
 		'MINIMAX_API_URL' {
 			config.api_url = value
 		}
+		'MINIMAX_IMAGE_API_URL' {
+			config.image_api_url = value
+		}
 		'MINIMAX_MODEL' {
 			config.model = value
+		}
+		'MINIMAX_IMAGE_MODEL' {
+			config.image_model = value
 		}
 		'MINIMAX_TEMPERATURE' {
 			if parsed := strconv.atof64(value) {

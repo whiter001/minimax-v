@@ -469,6 +469,8 @@ fn build_help_text() string {
 		'\x1b[1m配置文件\x1b[0m (~/.config/minimax/config):',
 		'  api_key=sk-cp-xxx              API Key（必填）',
 		'  model=MiniMax-M2.7',
+		'  image_model=image-01',
+		'  image_api_url=https://api.minimaxi.com/v1/image_generation',
 		'  temperature=0.7',
 		'  max_tokens=102400',
 		'  enable_tools=true              AI 工具调用（默认开启）',
@@ -494,9 +496,11 @@ fn print_help() {
 	println('\x1b[1m环境变量:\x1b[0m')
 	println('  MINIMAX_API_KEY                API Key（优先级最高）')
 	println('  MINIMAX_MODEL                  选择模型')
+	println('  MINIMAX_IMAGE_MODEL            选择生图模型')
 	println('  MINIMAX_TEMPERATURE            创意度')
 	println('  MINIMAX_MAX_TOKENS             输出长度')
 	println('  MINIMAX_SYSTEM_PROMPT          系统提示词')
+	println('  MINIMAX_IMAGE_API_URL          生图 API 地址')
 	println('  MINIMAX_ENABLE_TOOLS           启用AI工具 (true/1)')
 	println('  MINIMAX_AUTO_SKILLS            自动暴露并激活匹配的 skills (true/1)')
 	println('  MINIMAX_AUTO_CHECK_SOPS        任务开始前自动检查匹配的 SOP (true/1)')

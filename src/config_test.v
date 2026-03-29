@@ -12,6 +12,13 @@ fn test_parse_config_basic() {
 	assert config.temperature == 0.5
 }
 
+fn test_parse_config_image_defaults() {
+	content := 'image_model=image-01-live\nimage_api_url=https://api.minimaxi.com/v1/image_generation'
+	config := parse_config_content(content, default_config())
+	assert config.image_model == 'image-01-live'
+	assert config.image_api_url == 'https://api.minimaxi.com/v1/image_generation'
+}
+
 fn test_parse_config_with_quotes() {
 	content := 'api_key="sk-test-456"'
 	config := parse_config_content(content, default_config())
@@ -131,11 +138,13 @@ fn test_parse_config_smtp_fields() {
 }
 
 fn test_parse_config_all_fields() {
-	content := 'api_key=sk-all\napi_url=https://custom.api\nmodel=Custom-Model\ntemperature=1.0\nmax_tokens=5000\nsystem_prompt=Be helpful\nenable_tools=true\nauto_skills=true\nauto_check_sops=false\nauto_write_skills=false\nauto_upgrade_sops=false\nknowledge_sync_mode=concise\nenable_desktop_control=true\nenable_screen_capture=true\ndebug=true\nmax_rounds=100\ntoken_limit=50000\nworkspace=/tmp'
+	content := 'api_key=sk-all\napi_url=https://custom.api\nimage_api_url=https://image.api\nmodel=Custom-Model\nimage_model=image-01-live\ntemperature=1.0\nmax_tokens=5000\nsystem_prompt=Be helpful\nenable_tools=true\nauto_skills=true\nauto_check_sops=false\nauto_write_skills=false\nauto_upgrade_sops=false\nknowledge_sync_mode=concise\nenable_desktop_control=true\nenable_screen_capture=true\ndebug=true\nmax_rounds=100\ntoken_limit=50000\nworkspace=/tmp'
 	config := parse_config_content(content, default_config())
 	assert config.api_key == 'sk-all'
 	assert config.api_url == 'https://custom.api'
+	assert config.image_api_url == 'https://image.api'
 	assert config.model == 'Custom-Model'
+	assert config.image_model == 'image-01-live'
 	assert config.temperature == 1.0
 	assert config.max_tokens == 5000
 	assert config.system_prompt == 'Be helpful'
@@ -180,7 +189,9 @@ fn test_default_config() {
 	config := default_config()
 	assert config.api_key == ''
 	assert config.api_url == 'https://api.minimaxi.com/anthropic/v1/messages'
+	assert config.image_api_url == 'https://api.minimaxi.com/v1/image_generation'
 	assert config.model == 'MiniMax-M2.7'
+	assert config.image_model == 'image-01'
 	assert config.temperature == 0.7
 	assert config.max_tokens == 102400
 	assert config.max_rounds == 5000
@@ -219,6 +230,8 @@ fn test_get_minimax_config_dir_uses_minimax_config_home_override() {
 fn test_apply_env_override_supports_advanced_fields() {
 	mut config := default_config()
 	apply_env_override(mut config, 'MINIMAX_MAX_TOKENS', '204800')
+	apply_env_override(mut config, 'MINIMAX_IMAGE_API_URL', 'https://image.example/api')
+	apply_env_override(mut config, 'MINIMAX_IMAGE_MODEL', 'image-01-live')
 	apply_env_override(mut config, 'MINIMAX_ENABLE_LOGGING', 'true')
 	apply_env_override(mut config, 'MINIMAX_DEBUG', '1')
 	apply_env_override(mut config, 'MINIMAX_MAX_ROUNDS', '150')
@@ -231,6 +244,8 @@ fn test_apply_env_override_supports_advanced_fields() {
 	apply_env_override(mut config, 'MINIMAX_KNOWLEDGE_SYNC_MODE', 'strict')
 	apply_env_override(mut config, 'MINIMAX_WORKSPACE', '/tmp/ws')
 	assert config.max_tokens == 204800
+	assert config.image_api_url == 'https://image.example/api'
+	assert config.image_model == 'image-01-live'
 	assert config.enable_logging
 	assert config.debug
 	assert config.max_rounds == 150

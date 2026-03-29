@@ -495,7 +495,7 @@ fn send_mail_tool(config Config, mailserver string, mailport int, username strin
 	return 'Mail sent successfully to ${final_to}'
 }
 
-fn build_image_generation_request_json(input map[string]string) !string {
+fn build_image_generation_request_json(input map[string]string, default_model string) !string {
 	prompt := (input['prompt'] or { '' }).trim_space()
 	if prompt.len == 0 {
 		return error('prompt is required')
@@ -504,7 +504,13 @@ fn build_image_generation_request_json(input map[string]string) !string {
 		return error('prompt must be at most ${image_generation_prompt_max_chars} characters')
 	}
 
-	model := (input['model'] or { 'image-01' }).trim_space()
+	mut model := (input['model'] or { '' }).trim_space()
+	if model.len == 0 {
+		model = default_model.trim_space()
+	}
+	if model.len == 0 {
+		model = 'image-01'
+	}
 	if model !in image_generation_supported_models {
 		return error('unsupported model "${model}". Use image-01 or image-01-live')
 	}
@@ -646,13 +652,30 @@ fn build_image_generation_subject_reference_json(input map[string]string) !strin
 	return '[' + items.join(',') + ']'
 }
 
+fn effective_image_generation_api_url(config Config) string {
+	if config.image_api_url.trim_space().len > 0 {
+		return config.image_api_url.trim_space()
+	}
+	return minimax_image_generation_api_url
+}
+
+fn effective_image_generation_model(config Config) string {
+	if config.image_model.trim_space().len > 0 {
+		return config.image_model.trim_space()
+	}
+	return 'image-01'
+}
+
 fn image_generation_tool(config Config, input map[string]string, workspace string) string {
 	if config.api_key.trim_space().len == 0 {
 		return 'Error: image generation requires an API key'
 	}
 
-	request_body := build_image_generation_request_json(input) or { return 'Error: ${err.msg()}' }
+	request_body := build_image_generation_request_json(input, effective_image_generation_model(config)) or {
+		return 'Error: ${err.msg()}'
+	}
 	save_path := (input['save_path'] or { '' }).trim_space()
+	api_url := effective_image_generation_api_url(config)
 
 	mut headers := http.new_header()
 	headers.add(.authorization, 'Bearer ${config.api_key}')
@@ -660,19 +683,16 @@ fn image_generation_tool(config Config, input map[string]string, workspace strin
 	headers.add(.connection, 'close')
 	mut req := http.Request{
 		method:        .post
-		url:           minimax_image_generation_api_url
+		url:           api_url
 		header:        headers
 		data:          request_body
 		read_timeout:  180 * time.second
 		write_timeout: 60 * time.second
 	}
-	// Keep the normal V HTTP path first, but fall back to curl when the client stack
-	// cannot complete the request even though the API itself is reachable.
 	mut response := req.do() or {
-		fallback_body := request_image_generation_via_curl(config.api_key, request_body) or {
+		fallback_body := request_image_generation_via_curl(config.api_key, api_url, request_body) or {
 			return 'Error: image generation request failed: ${err}'
 		}
-		// Reuse the same downstream parsing logic after the fallback succeeds.
 		http.Response{
 			body:         fallback_body
 			header:       http.Header{}
@@ -752,12 +772,9 @@ fn image_generation_tool(config Config, input map[string]string, workspace strin
 	return summary
 }
 
-// Uses curl as a fallback path when the V HTTP client cannot talk to the image API.
-fn request_image_generation_via_curl(api_key string, request_body string) !string {
+fn request_image_generation_via_curl(api_key string, api_url string, request_body string) !string {
 	stamp := time.now().unix_milli()
-	// Curl reads the request body from disk so we can preserve the exact JSON payload.
 	tmp_request := os.join_path(os.temp_dir(), 'minimax_image_generation_${stamp}.json')
-	// The response body is also captured to disk because curl only prints the status code.
 	tmp_response := os.join_path(os.temp_dir(), 'minimax_image_generation_${stamp}.body')
 	os.write_file(tmp_request, request_body) or {
 		return error('failed to write fallback request body: ${err.msg()}')
@@ -767,7 +784,7 @@ fn request_image_generation_via_curl(api_key string, request_body string) !strin
 		os.rm(tmp_response) or {}
 	}
 
-	command := 'curl --silent --show-error --http1.1 --output ${shell_escape(tmp_response)} --write-out %{http_code} -X POST ${shell_escape(minimax_image_generation_api_url)} -H ${shell_escape('Authorization: Bearer ${api_key}')} -H ${shell_escape('Content-Type: application/json')} --data-binary @${shell_escape(tmp_request)}'
+	command := 'curl --silent --show-error --http1.1 --output ${shell_escape(tmp_response)} --write-out %{http_code} -X POST ${shell_escape(api_url)} -H ${shell_escape('Authorization: Bearer ${api_key}')} -H ${shell_escape('Content-Type: application/json')} --data-binary @${shell_escape(tmp_request)}'
 	result := os.execute(command)
 	if result.exit_code != 0 {
 		return error('curl fallback failed: ${result.output.trim_space()}')
@@ -778,7 +795,6 @@ fn request_image_generation_via_curl(api_key string, request_body string) !strin
 		return error('failed to read curl fallback response: ${err.msg()}')
 	}
 	status_code := code.int()
-	// Preserve the API contract by rejecting non-200 responses before parsing body content.
 	if status_code != 200 {
 		return error('image generation API ${status_code}: ${body}')
 	}
@@ -4074,7 +4090,7 @@ fn get_tools_schema_json() string {
 		'{"name":"read_many_files","description":"Read multiple files at once. Supports comma-separated file paths and glob patterns (e.g. *.v, src/*.ts). Returns the concatenated contents of all matched files. Max 20 files per call.","input_schema":{"type":"object","properties":{"paths":{"type":"string","description":"Comma-separated file paths or glob patterns (e.g. src/main.v,src/tools.v or src/*.v)"}},"required":["paths"]}},' +
 		'{"name":"activate_skill","description":"Activate a specialized skill to gain expert-level instructions for a specific domain. This loads the full skill prompt into your context. Use this when the task would benefit from specialized expertise. Call with the skill name.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"The name of the skill to activate (e.g. coder, reviewer, architect, debugger)"}},"required":["name"]}},' +
 		'{"name":"cron","description":"Manage cron scheduled tasks. Actions: create (add a cron job), create_once (add a one-time delayed job), list, show, delete, enable, disable, stats, log, run_now (execute immediately), daemon (start/stop/restart/status). When creating a job, if no daemon is running it will be auto-started.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: create, create_once, list, show, delete, enable, disable, stats, log, run_now, daemon, status"},"name":{"type":"string","description":"Job name (for create, create_once, delete, enable, disable)"},"schedule":{"type":"string","description":"Cron expression like */5 * * * * (for create)"},"delay_seconds":{"type":"integer","description":"Delay in seconds (for create_once)"},"command":{"type":"string","description":"Command to execute when job runs"},"job_id":{"type":"string","description":"Job ID (for show, delete, enable, disable, log, run_now)"},"daemon_action":{"type":"string","description":"Daemon sub-action: start, stop, restart, status (for daemon action)"}},"required":["action"]}},' +
-		'{"name":"generate_image","description":"Generate an image from text or reference images using the MiniMax image generation API. Supports image-01 and image-01-live.","input_schema":{"type":"object","properties":{"prompt":{"type":"string","description":"Text description of the image to generate. Max 1500 characters."},"model":{"type":"string","description":"Model name: image-01 or image-01-live","enum":["image-01","image-01-live"]},"aspect_ratio":{"type":"string","description":"Image aspect ratio, such as 1:1, 16:9, 4:3, 3:2, 2:3, 3:4, 9:16, or 21:9"},"width":{"type":"integer","description":"Width in pixels for image-01 (512-2048, multiple of 8)."},"height":{"type":"integer","description":"Height in pixels for image-01 (512-2048, multiple of 8)."},"response_format":{"type":"string","description":"Return format: url or base64","enum":["url","base64"]},"seed":{"type":"integer","description":"Optional random seed for reproducible results."},"n":{"type":"integer","description":"Number of images to generate (1-9)."},"prompt_optimizer":{"type":"boolean","description":"Whether to enable prompt optimization."},"aigc_watermark":{"type":"boolean","description":"Whether to add a watermark."},"style":{"type":"string","description":"Raw JSON style object for image-01-live."},"subject_reference":{"type":"string","description":"Raw JSON string for the subject_reference field."},"reference_image_url":{"type":"string","description":"Single reference image URL."},"reference_image_urls":{"type":"string","description":"Comma or newline separated reference image URLs."},"reference_image_type":{"type":"string","description":"Reference image type, default character."},"save_path":{"type":"string","description":"Optional local file path to save generated images."}},"required":["prompt"]}},' +
+		'{"name":"generate_image","description":"Generate an image from text or reference images using the MiniMax image generation API. Supports image-01 and image-01-live. If the model field is omitted, the configured image_model is used.","input_schema":{"type":"object","properties":{"prompt":{"type":"string","description":"Text description of the image to generate. Max 1500 characters."},"model":{"type":"string","description":"Model name: image-01 or image-01-live","enum":["image-01","image-01-live"]},"aspect_ratio":{"type":"string","description":"Image aspect ratio, such as 1:1, 16:9, 4:3, 3:2, 2:3, 3:4, 9:16, or 21:9"},"width":{"type":"integer","description":"Width in pixels for image-01 (512-2048, multiple of 8)."},"height":{"type":"integer","description":"Height in pixels for image-01 (512-2048, multiple of 8)."},"response_format":{"type":"string","description":"Return format: url or base64","enum":["url","base64"]},"seed":{"type":"integer","description":"Optional random seed for reproducible results."},"n":{"type":"integer","description":"Number of images to generate (1-9)."},"prompt_optimizer":{"type":"boolean","description":"Whether to enable prompt optimization."},"aigc_watermark":{"type":"boolean","description":"Whether to add a watermark."},"style":{"type":"string","description":"Raw JSON style object for image-01-live."},"subject_reference":{"type":"string","description":"Raw JSON string for the subject_reference field."},"reference_image_url":{"type":"string","description":"Single reference image URL."},"reference_image_urls":{"type":"string","description":"Comma or newline separated reference image URLs."},"reference_image_type":{"type":"string","description":"Reference image type, default character."},"save_path":{"type":"string","description":"Optional local file path to save generated images."}},"required":["prompt"]}},' +
 		'{"name":"generate_speech","description":"Generate speech audio from text using the MiniMax synchronous speech-to-audio HTTP API. Provide text plus optional model, voice settings, and save_path to download the resulting audio URL locally.","input_schema":{"type":"object","properties":{"text":{"type":"string","description":"Text to synthesize. Alias: prompt. Max 10000 characters."},"prompt":{"type":"string","description":"Alias for text."},"model":{"type":"string","description":"Model name: speech-2.8-hd, speech-2.8-turbo, speech-2.6-hd, speech-2.6-turbo, speech-02-hd, speech-02-turbo, speech-01-hd, or speech-01-turbo","enum":["speech-2.8-hd","speech-2.8-turbo","speech-2.6-hd","speech-2.6-turbo","speech-02-hd","speech-02-turbo","speech-01-hd","speech-01-turbo"]},"output_format":{"type":"string","description":"Response format: url or hex. Use url when you want to download the audio.","enum":["url","hex"]},"voice_id":{"type":"string","description":"Optional voice id used to build voice_setting when voice_setting is not provided."},"speed":{"type":"number","description":"Optional speaking speed used to build voice_setting."},"volume":{"type":"number","description":"Optional speaking volume used to build voice_setting."},"pitch":{"type":"number","description":"Optional speaking pitch used to build voice_setting."},"voice_setting":{"type":"string","description":"Raw JSON string for the voice_setting object. If provided, it overrides voice_id/speed/volume/pitch."},"audio_setting":{"type":"string","description":"Raw JSON string for the audio_setting object."},"pronunciation_dict":{"type":"string","description":"Raw JSON string for the pronunciation_dict object."},"timbre_weights":{"type":"string","description":"Raw JSON string for the timbre_weights array or object."},"language_boost":{"type":"string","description":"Optional language_boost value such as auto or a language name."},"subtitle_enable":{"type":"boolean","description":"Whether to enable subtitle output."},"aigc_watermark":{"type":"boolean","description":"Whether to add an audio watermark."},"save_path":{"type":"string","description":"Optional local file path to download the returned audio URL."}},"required":["text"]}},' +
 		'{"name":"send_mail","description":"Send an email via SMTP. Requires smtp_server, smtp_port, smtp_username, smtp_password configured (via config file or MINIMAX_SMTP_* env vars).","input_schema":{"type":"object","properties":{"mailserver":{"type":"string","description":"SMTP server hostname (optional if configured in config)"},"mailport":{"type":"integer","description":"SMTP port number: 587 (TLS) or 465 (SSL) (optional if configured in config)"},"username":{"type":"string","description":"SMTP username (optional if configured in config)"},"password":{"type":"string","description":"SMTP password (optional if configured in config)"},"from":{"type":"string","description":"Sender email address (optional if configured in config)"},"to":{"type":"string","description":"Recipient email address (optional if smtp_to is configured)"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Email body content"}},"required":["subject","body"]}}' +
 		']'

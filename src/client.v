@@ -15,6 +15,8 @@ const default_agent_prompt = 'You are a helpful AI assistant with access to tool
 Guidelines:
 - For file operations: Use read_file, write_file, list_dir tools
 - For shell commands: Use bash tool (supports &&, ||, pipes, redirects)
+- For image requests: Use generate_image directly when the user asks for an image, illustration, poster, cover, logo, wallpaper, diagram, or other visual asset. Do not answer with text when the task clearly needs an image.
+- For image requests: If no specific image model is requested, omit the model field so the configured image defaults are used.
 - For browser automation: prefer explicit selectors, text, or URL/state checks; avoid long `networkidle` waits unless no better signal exists
 - Keep browser waits short and iterative; recheck visible state before retrying or falling back
 - On Windows: use "start URL" to open browser, "start ." to open file explorer
