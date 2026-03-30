@@ -396,6 +396,14 @@ fn (mut c ApiClient) build_request_json() string {
 	return c.build_request_json_internal(c.messages)
 }
 
+// Keep system prompt parts in a flat list so we can join once instead of rebuilding
+// the full prompt after every optional insert.
+fn append_system_prompt_part(mut parts []string, part string) {
+	if part.len > 0 {
+		parts << part
+	}
+}
+
 fn (mut c ApiClient) build_request_json_internal(messages []ChatMessage) string {
 	mut body_json := '{"model":"${c.model}","max_tokens":${c.max_tokens},"temperature":${c.temperature}'
 
@@ -414,102 +422,58 @@ fn (mut c ApiClient) build_request_json_internal(messages []ChatMessage) string 
 	}
 
 	// Build effective system prompt (with workspace context if set)
-	mut effective_system := c.system_prompt
+	mut system_parts := []string{}
 	// Inject default agent prompt when tools enabled and no custom prompt
-	if c.enable_tools && effective_system.len == 0 {
-		effective_system = default_agent_prompt
+	if c.enable_tools && c.system_prompt.len == 0 {
+		append_system_prompt_part(mut system_parts, default_agent_prompt)
+	} else {
+		append_system_prompt_part(mut system_parts, c.system_prompt)
 	}
 
 	// Plan mode: inject planning instruction
 	if c.plan_mode {
 		plan_instruction := 'You are currently in PLAN MODE. Before executing any actions:\n1. First analyze the task and create a detailed step-by-step plan\n2. Present the plan to the user for review\n3. Only use the sequentialthinking tool to organize your plan\n4. Use ask_user to confirm the plan before proceeding with execution\n5. After user approval, execute the plan step by step\nDo NOT modify files or run commands until the user has approved your plan.'
-		if effective_system.len > 0 {
-			effective_system = '${effective_system}\n\n${plan_instruction}'
-		} else {
-			effective_system = plan_instruction
-		}
+		append_system_prompt_part(mut system_parts, plan_instruction)
 	}
 
 	// Inject AGENTS.md context (user-level first, then project-level overrides)
 	agents_context := load_agents_md(c.workspace)
-	if agents_context.len > 0 {
-		if effective_system.len > 0 {
-			effective_system = '${effective_system}\n\n${agents_context}'
-		} else {
-			effective_system = agents_context
-		}
-	}
+	append_system_prompt_part(mut system_parts, agents_context)
 
 	// Inject skills metadata so AI can discover and activate skills
 	if c.enable_tools {
 		skills_meta := build_skills_metadata()
-		if skills_meta.len > 0 {
-			if effective_system.len > 0 {
-				effective_system = '${effective_system}\n\n${skills_meta}'
-			} else {
-				effective_system = skills_meta
-			}
-		}
+		append_system_prompt_part(mut system_parts, skills_meta)
 		sops_meta := build_sops_metadata()
-		if sops_meta.len > 0 {
-			if effective_system.len > 0 {
-				effective_system = '${effective_system}\n\n${sops_meta}'
-			} else {
-				effective_system = sops_meta
-			}
-		}
+		append_system_prompt_part(mut system_parts, sops_meta)
 		if c.auto_skills {
 			auto_skills_instruction := 'When the user task matches one of the available skills, proactively call the activate_skill tool yourself before continuing. Choose the best matching skill without asking the user unless the choice is genuinely ambiguous.'
-			if effective_system.len > 0 {
-				effective_system = '${effective_system}\n\n${auto_skills_instruction}'
-			} else {
-				effective_system = auto_skills_instruction
-			}
+			append_system_prompt_part(mut system_parts, auto_skills_instruction)
 		}
 		if c.auto_check_sops && sops_meta.len > 0 {
 			auto_sops_instruction := 'Before executing a task, proactively call the match_sop tool with the user task to identify the best matching SOP. If relevant SOPs are returned, follow the suggested_read_order, read the recommended SOP files with the read_file tool, and use them as operating guidance. Do this without asking the user unless multiple SOPs conflict or the match is genuinely unclear. Repository instructions, workspace instructions, and direct user instructions override SOP guidance when they conflict.'
-			if effective_system.len > 0 {
-				effective_system = '${effective_system}\n\n${auto_sops_instruction}'
-			} else {
-				effective_system = auto_sops_instruction
-			}
+			append_system_prompt_part(mut system_parts, auto_sops_instruction)
 		}
-		if effective_system.len > 0 {
-			effective_system = '${effective_system}\n\n${default_experience_capture_instruction}'
-		} else {
-			effective_system = default_experience_capture_instruction
-		}
+		append_system_prompt_part(mut system_parts, default_experience_capture_instruction)
 
 		// Inject session notes (persistent memory across sessions)
 		session_notes := session_note_read()
 		if session_notes.len > 0 && session_notes != '(No session notes yet)'
 			&& session_notes != '(Session notes file is empty)' {
 			session_note_prompt := 'Below are notes from previous sessions related to this project:\n\n${session_notes}\n\nUse these notes to align with project state, decisions, and temporary constraints.'
-			if effective_system.len > 0 {
-				effective_system = '${effective_system}\n\n${session_note_prompt}'
-			} else {
-				effective_system = session_note_prompt
-			}
+			append_system_prompt_part(mut system_parts, session_note_prompt)
 		}
 
 		working_checkpoint := get_working_checkpoint_context()
-		if working_checkpoint.len > 0 {
-			if effective_system.len > 0 {
-				effective_system = '${effective_system}\n\n${working_checkpoint}'
-			} else {
-				effective_system = working_checkpoint
-			}
-		}
+		append_system_prompt_part(mut system_parts, working_checkpoint)
 	}
 
 	if c.workspace.len > 0 {
 		workspace_ctx := 'Working directory: ${c.workspace}\\nAll relative file paths should be resolved relative to this directory.'
-		if effective_system.len > 0 {
-			effective_system = '${effective_system}\\n\\n${workspace_ctx}'
-		} else {
-			effective_system = workspace_ctx
-		}
+		append_system_prompt_part(mut system_parts, workspace_ctx)
 	}
+
+	effective_system := system_parts.join('\n\n')
 
 	// system: top-level field per Anthropic spec (tools → system → messages cache order)
 	// Add cache_control so the static system prompt is cached as a prefix anchor.
@@ -1057,7 +1021,7 @@ fn (mut c ApiClient) block_repeated_failed_tool_batch(mut step AgentStep, mut ex
 }
 
 fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tools []ToolUse, last_failed_bash_command string, failed_bash_command_streak int) ToolRoundExecutionResult {
-	mut results_json := '['
+	mut result_parts := []string{}
 	mut tool_results := []string{}
 	mut tool_names := []string{}
 	mut task_done_result := ''
@@ -1115,12 +1079,9 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 		c.logger.log_tool_result(tu.name, raw_result.len, is_truncated)
 		c.logger.log_tool_result_detail(tu.name, raw_result)
 		escaped := escape_json_string(result)
-		results_json += '{"type":"tool_result","tool_use_id":"${tu.id}","content":"${escaped}"},'
+		result_parts << '{"type":"tool_result","tool_use_id":"${tu.id}","content":"${escaped}"}'
 	}
-	if results_json.ends_with(',') {
-		results_json = results_json[..results_json.len - 1]
-	}
-	results_json += ']'
+	results_json := '[${result_parts.join(',')}]'
 	mut round_has_tool_errors := false
 	mut round_all_tool_errors := tool_results.len > 0
 	for tr in tool_results {
