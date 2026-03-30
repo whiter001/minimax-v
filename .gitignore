@@ -38,3 +38,4 @@ bash_out_*
 *.log
 nul
 .codebuddy/
+artifacts/

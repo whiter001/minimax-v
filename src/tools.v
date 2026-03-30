@@ -596,12 +596,15 @@ fn build_image_generation_request_json(input map[string]string, default_model st
 		body_parts << '"style":${detect_jq_value(style)}'
 	}
 	if subject_reference_json.len > 0 {
+		// subject_reference accepts either raw JSON or local/remote image sources.
 		body_parts << '"subject_reference":${subject_reference_json}'
 	}
 
 	return '{' + body_parts.join(',') + '}'
 }
 
+// Normalize reference image inputs so callers can pass raw JSON, a remote URL,
+// a file:// URI, or a local file path that will be converted to a data URL.
 fn build_image_generation_subject_reference_json(input map[string]string) !string {
 	raw_subject_reference := (input['subject_reference'] or { '' }).trim_space()
 	if raw_subject_reference.len > 0 {
@@ -621,13 +624,17 @@ fn build_image_generation_subject_reference_json(input map[string]string) !strin
 	reference_image_type := (input['reference_image_type'] or { 'character' }).trim_space()
 	mut urls := []string{}
 	if reference_image_url.len > 0 {
-		urls << reference_image_url
+		urls << normalize_image_generation_reference_source(reference_image_url) or {
+			return error('failed to prepare reference_image_url: ${err.msg()}')
+		}
 	}
 	if reference_image_urls_raw.len > 0 {
 		for candidate in reference_image_urls_raw.replace('\n', ',').replace(';', ',').split(',') {
 			trimmed := candidate.trim_space()
 			if trimmed.len > 0 {
-				urls << trimmed
+				urls << normalize_image_generation_reference_source(trimmed) or {
+					return error('failed to prepare reference_image_urls: ${err.msg()}')
+				}
 			}
 		}
 	}
@@ -650,6 +657,42 @@ fn build_image_generation_subject_reference_json(input map[string]string) !strin
 		return ''
 	}
 	return '[' + items.join(',') + ']'
+}
+
+// Keep file-path handling isolated here so image generation can accept a local
+// reference image without duplicating MIME detection or base64 encoding.
+fn normalize_image_generation_reference_source(source string) !string {
+	trimmed := source.trim_space()
+	if trimmed.len == 0 {
+		return error('reference image source is empty')
+	}
+	if trimmed.starts_with('data:') || trimmed.starts_with('http://')
+		|| trimmed.starts_with('https://') || trimmed.starts_with('file://') {
+		return trimmed
+	}
+	if !os.is_file(trimmed) {
+		return trimmed
+	}
+	bytes := os.read_bytes(trimmed) or {
+		return error('failed to read reference image file: ${err.msg()}')
+	}
+	if bytes.len == 0 {
+		return error('reference image file is empty')
+	}
+	mime_type := image_generation_mime_type_from_path(trimmed)
+	encoded := base64.encode(bytes)
+	return 'data:${mime_type};base64,${encoded}'
+}
+
+// Use a conservative MIME fallback for uncommon reference image extensions.
+fn image_generation_mime_type_from_path(path string) string {
+	return match os.file_ext(path).to_lower() {
+		'.jpg', '.jpeg' { 'image/jpeg' }
+		'.png' { 'image/png' }
+		'.webp' { 'image/webp' }
+		'.gif' { 'image/gif' }
+		else { 'application/octet-stream' }
+	}
 }
 
 fn effective_image_generation_api_url(config Config) string {

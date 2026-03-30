@@ -311,6 +311,49 @@ fn test_build_image_generation_request_json_with_raw_subject_reference() {
 	assert body.contains('"subject_reference":[{"type":"character","image_file":"https://example.com/ref.png"}]')
 }
 
+fn test_build_image_generation_request_json_converts_local_reference_image_path() {
+	test_path := '/tmp/__minimax_reference_image__.jpeg'
+	os.write_bytes(test_path, [u8(0x61), 0x62, 0x63]) or {
+		assert false
+		return
+	}
+	defer { os.rm(test_path) or {} }
+	body := build_image_generation_request_json({
+		'prompt':              'a portrait'
+		'reference_image_url': test_path
+	}, 'image-01') or {
+		assert false
+		return
+	}
+	assert body.contains('"image_file":"data:image/jpeg;base64,YWJj"')
+}
+
+fn test_build_image_generation_request_json_converts_multiple_local_reference_image_paths() {
+	test_path_1 := '/tmp/__minimax_reference_image_1__.png'
+	test_path_2 := '/tmp/__minimax_reference_image_2__.webp'
+	os.write_bytes(test_path_1, [u8(0x61), 0x62]) or {
+		assert false
+		return
+	}
+	os.write_bytes(test_path_2, [u8(0x63), 0x64]) or {
+		assert false
+		return
+	}
+	defer {
+		os.rm(test_path_1) or {}
+		os.rm(test_path_2) or {}
+	}
+	body := build_image_generation_request_json({
+		'prompt':               'a portrait'
+		'reference_image_urls': '${test_path_1},${test_path_2}'
+	}, 'image-01') or {
+		assert false
+		return
+	}
+	assert body.contains('"image_file":"data:image/png;base64,YWI="')
+	assert body.contains('"image_file":"data:image/webp;base64,Y2Q="')
+}
+
 fn test_build_image_generation_request_json_live_model_supports_style() {
 	body := build_image_generation_request_json({
 		'prompt': 'a watercolor fox'
