@@ -445,6 +445,178 @@ fn test_generate_image_tool_requires_api_key() {
 	assert result.contains('requires an API key')
 }
 
+// ===== image generation negative validation =====
+
+fn test_build_image_generation_request_json_rejects_empty_prompt() {
+	if _ := build_image_generation_request_json({
+		'prompt': ''
+	}, 'image-01')
+	{
+		assert false, 'should reject empty prompt'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_missing_prompt() {
+	if _ := build_image_generation_request_json(map[string]string{}, 'image-01') {
+		assert false, 'should reject missing prompt'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_unsupported_model() {
+	if _ := build_image_generation_request_json({
+		'prompt': 'test'
+		'model':  'invalid-model'
+	}, 'image-01')
+	{
+		assert false, 'should reject unsupported model'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_style_on_image_01() {
+	if _ := build_image_generation_request_json({
+		'prompt': 'test'
+		'model':  'image-01'
+		'style':  'watercolor'
+	}, 'image-01')
+	{
+		assert false, 'should reject style on image-01'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_21_9_on_live_model() {
+	if _ := build_image_generation_request_json({
+		'prompt':       'test'
+		'model':        'image-01-live'
+		'aspect_ratio': '21:9'
+	}, 'image-01')
+	{
+		assert false, 'should reject 21:9 on image-01-live'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_non_integer_seed() {
+	if _ := build_image_generation_request_json({
+		'prompt': 'test'
+		'seed':   'abc'
+	}, 'image-01')
+	{
+		assert false, 'should reject non-integer seed'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_n_out_of_range() {
+	if _ := build_image_generation_request_json({
+		'prompt': 'test'
+		'n':      '0'
+	}, 'image-01')
+	{
+		assert false, 'should reject n=0'
+	}
+	if _ := build_image_generation_request_json({
+		'prompt': 'test'
+		'n':      '10'
+	}, 'image-01')
+	{
+		assert false, 'should reject n=10'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_width_without_height() {
+	if _ := build_image_generation_request_json({
+		'prompt': 'test'
+		'width':  '1024'
+	}, 'image-01')
+	{
+		assert false, 'should reject width without height'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_width_below_512() {
+	if _ := build_image_generation_request_json({
+		'prompt': 'test'
+		'width':  '256'
+		'height': '512'
+	}, 'image-01')
+	{
+		assert false, 'should reject width below 512'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_width_not_multiple_of_8() {
+	if _ := build_image_generation_request_json({
+		'prompt': 'test'
+		'width':  '1023'
+		'height': '1024'
+	}, 'image-01')
+	{
+		assert false, 'should reject width not multiple of 8'
+	}
+}
+
+fn test_build_image_generation_request_json_rejects_width_on_live_model() {
+	if _ := build_image_generation_request_json({
+		'prompt': 'test'
+		'model':  'image-01-live'
+		'width':  '1024'
+		'height': '1024'
+	}, 'image-01')
+	{
+		assert false, 'should reject width/height on image-01-live'
+	}
+}
+
+fn test_build_image_generation_request_json_seed_is_integer_in_json() {
+	body := build_image_generation_request_json({
+		'prompt': 'test'
+		'seed':   '42'
+	}, 'image-01') or {
+		assert false
+		return
+	}
+	assert body.contains('"seed":42')
+	assert !body.contains('"seed":"42"')
+}
+
+// ===== summarize_image_generation_response edge cases =====
+
+fn test_summarize_image_generation_response_empty_body() {
+	summary := summarize_image_generation_response('')
+	assert summary.contains('Error')
+	assert summary.contains('empty')
+}
+
+fn test_summarize_image_generation_response_no_images_shows_raw() {
+	body := '{"base_resp":{"status_code":0}}'
+	summary := summarize_image_generation_response(body)
+	assert summary.contains('raw_response')
+}
+
+// ===== resolve_image_generation_save_path =====
+
+fn test_resolve_image_generation_save_path_single_file() {
+	path := resolve_image_generation_save_path('/tmp/output.png', 0, 1, false)
+	assert path == '/tmp/output.png'
+}
+
+fn test_resolve_image_generation_save_path_multi_file() {
+	path0 := resolve_image_generation_save_path('/tmp/output.png', 0, 3, false)
+	path2 := resolve_image_generation_save_path('/tmp/output.png', 2, 3, false)
+	assert path0.contains('output_1_of_3.png')
+	assert path2.contains('output_3_of_3.png')
+}
+
+fn test_resolve_image_generation_save_path_directory() {
+	path := resolve_image_generation_save_path('/tmp/images', 0, 1, true)
+	assert path.starts_with('/tmp/images/')
+	assert path.ends_with('.jpeg')
+}
+
+fn test_resolve_image_generation_save_path_no_extension() {
+	path := resolve_image_generation_save_path('/tmp/output', 0, 2, false)
+	assert path.contains('output_1_of_2')
+	assert !path.contains('.')
+}
+
 fn test_summarize_speech_synthesis_response_extracts_urls() {
 	body := '{"id":"speech_job_1","trace_id":"trace_123","data":{"audio_url":"https://example.com/audio.mp3"}}'
 	summary := summarize_speech_synthesis_response(body)

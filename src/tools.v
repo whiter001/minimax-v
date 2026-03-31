@@ -590,7 +590,7 @@ fn build_image_generation_request_json(input map[string]string, default_model st
 		body_parts << '"height":${height}'
 	}
 	if seed_raw.len > 0 {
-		body_parts << '"seed":${detect_jq_value(seed_raw)}'
+		body_parts << '"seed":${seed_raw}'
 	}
 	if style.len > 0 {
 		body_parts << '"style":${detect_jq_value(style)}'
@@ -746,6 +746,15 @@ fn image_generation_tool(config Config, input map[string]string, workspace strin
 	}
 	if response.status_code != 200 {
 		return 'Error: image generation API ${response.status_code}: ${response.body}'
+	}
+	// Check for business-level errors: HTTP 200 but base_resp.status_code != 0.
+	base_resp_obj := extract_json_object_value(response.body, 'base_resp')
+	if base_resp_obj.len > 0 {
+		status_code_val := extract_json_number_value(base_resp_obj, 'status_code')
+		if status_code_val != 0 {
+			status_msg := extract_json_string_value(base_resp_obj, 'status_msg')
+			return 'Error: image generation API error (${status_code_val}): ${status_msg}'
+		}
 	}
 	mut summary := summarize_image_generation_response(response.body)
 	if save_path.len == 0 {
