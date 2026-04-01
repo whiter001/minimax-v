@@ -1,0 +1,41 @@
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
+minimax_cli
+minimax-v
+
+# V language build artifacts
+.vscode/
+.vlog/
+_tmp/
+*.v.compiled
+
+# Test artifacts
+*.out
+test_results/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor directories
+.idea/
+*.swp
+*.swo
+*~
+.vs/
+
+# Playwright / MCP temp files
+.playwright-mcp/
+console-*.log
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# User-specific files
+*.local
