@@ -243,10 +243,16 @@ fn (mut m McpManager) call_tool(tool_name string, arguments string) !string {
 fn start_mcp_server(mut server McpServer) {
 	println('[MCP] 启动 ${server.name}...')
 
-	// Resolve command to absolute path
-	cmd := os.find_abs_path_of_executable(server.command) or {
-		println('[MCP] ❌ 找不到命令: ${server.command}')
-		return
+	// Use command directly if it appears to be an absolute path on Windows (contains :\ or :/)
+	// Workaround for V's find_abs_path_of_executable bug on Windows with absolute paths
+	cmd := if (server.command.contains(':\\') || server.command.contains(':/'))
+		&& os.is_executable(server.command) {
+		server.command
+	} else {
+		os.find_abs_path_of_executable(server.command) or {
+			println('[MCP] ❌ 找不到命令: ${server.command}')
+			return
+		}
 	}
 
 	mut proc := build_mcp_process(server, cmd)
