@@ -4,6 +4,7 @@ module main
 // Minimal implementation with McpService, JSON-RPC 2.0 over stdio, and built-in tools
 import os
 import time
+import minimax
 
 const default_mcp_request_timeout_ms = 30000
 const understand_image_timeout_ms = 60000
@@ -42,7 +43,8 @@ pub mut:
 @[heap]
 pub struct McpService {
 pub mut:
-	servers []&McpServer
+	servers          []&McpServer
+	minimax_client   &minimax.Client = unsafe { nil }
 }
 
 pub struct McpServerConfig {
@@ -59,6 +61,10 @@ pub fn new_mcp_service() McpService {
 	return McpService{
 		servers: []&McpServer{}
 	}
+}
+
+pub fn (mut m McpService) set_minimax_client(client &minimax.Client) {
+	m.minimax_client = client
 }
 
 fn (mut m McpService) add_server(name string, command string, args []string, env map[string]string) {
@@ -152,12 +158,11 @@ fn (mut m McpService) try_start_lazy_server_for_tool(tool_name string) bool {
 }
 
 fn (mut m McpService) call_tool(tool_name string, arguments string) !string {
-	// Try built-in tools first
-	if tool_name == 'web_search' {
-		return builtin_web_search(arguments)
-	}
-	if tool_name == 'understand_image' {
-		return builtin_understand_image(arguments)
+	// Try minimax built-in tools first (if client is set)
+	if !isnil(m.minimax_client) {
+		if result := m.call_minimax_tool(tool_name, arguments) {
+			return result
+		}
 	}
 
 	// Try connected servers
@@ -180,6 +185,60 @@ fn (mut m McpService) call_tool(tool_name string, arguments string) !string {
 	}
 
 	return error('MCP tool "${tool_name}" not found')
+}
+
+// === MiniMax Tool Dispatcher ===
+
+fn (mut m McpService) call_minimax_tool(tool_name string, arguments string) ?string {
+	if isnil(m.minimax_client) {
+		return none
+	}
+
+	result := m.minimax_tool_dispatch(tool_name, arguments) or {
+		return none
+	}
+	return result
+}
+
+fn (mut m McpService) minimax_tool_dispatch(tool_name string, arguments string) !string {
+	match tool_name {
+		'web_search' {
+			return m.minimax_web_search(arguments)
+		}
+		'understand_image' {
+			return m.minimax_understand_image(arguments)
+		}
+		'text_to_audio' {
+			return m.minimax_text_to_audio(arguments)
+		}
+		'list_voices' {
+			return m.minimax_list_voices(arguments)
+		}
+		'voice_clone' {
+			return m.minimax_voice_clone(arguments)
+		}
+		'play_audio' {
+			return m.minimax_play_audio(arguments)
+		}
+		'generate_video' {
+			return m.minimax_generate_video(arguments)
+		}
+		'query_video_generation' {
+			return m.minimax_query_video(arguments)
+		}
+		'text_to_image' {
+			return m.minimax_text_to_image(arguments)
+		}
+		'music_generation' {
+			return m.minimax_music_generation(arguments)
+		}
+		'voice_design' {
+			return m.minimax_voice_design(arguments)
+		}
+		else {
+			return error('unknown tool')
+		}
+	}
 }
 
 // === Built-in Tools ===
@@ -252,6 +311,399 @@ fn builtin_understand_image(arguments string) !string {
 	// Call the understand_image MCP tool via mcp__MiniMax__understand_image
 	// This is handled externally via the tool dispatch mechanism
 	return error('understand_image must be called via MCP tool dispatch')
+}
+
+// === MiniMax Tool Implementations ===
+
+fn (mut m McpService) minimax_web_search(arguments string) !string {
+	mut query := extract_json_string_value(arguments, 'query')
+	if query.len == 0 {
+		query = extract_json_string_value(arguments, 'q')
+	}
+	if query.len == 0 {
+		return error('web_search: query is required')
+	}
+
+	req := minimax.SearchRequest{query: query}
+	result := m.minimax_client.search(req)!
+	return map_to_json_string(result)
+}
+
+fn (mut m McpService) minimax_understand_image(arguments string) !string {
+	mut image_path := extract_json_string_value(arguments, 'image_path')
+	if image_path.len == 0 {
+		image_path = extract_json_string_value(arguments, 'image_source')
+	}
+	if image_path.len == 0 {
+		return error('understand_image: image_path is required')
+	}
+
+	mut prompt := extract_json_string_value(arguments, 'prompt')
+	if prompt.len == 0 {
+		prompt = 'Describe this image'
+	}
+
+	processed_url := minimax.process_image_url(image_path)!
+	req := minimax.VLMRequest{prompt: prompt, image_url: processed_url}
+	result := m.minimax_client.vlm(req)!
+	return map_to_json_string(result)
+}
+
+fn (mut m McpService) minimax_text_to_audio(arguments string) !string {
+	text := extract_json_string_value(arguments, 'text')
+	if text.len == 0 {
+		return error('text_to_audio: text is required')
+	}
+
+	voice_id := extract_json_string_value_with_default(arguments, 'voice_id', minimax.default_voice_id)
+	model := extract_json_string_value_with_default(arguments, 'model', minimax.default_speech_model)
+	speed := extract_json_float_with_default(arguments, 'speed', minimax.default_speed)
+	vol := extract_json_float_with_default(arguments, 'vol', minimax.default_volume)
+	pitch := extract_json_int_with_default(arguments, 'pitch', minimax.default_pitch)
+	emotion := extract_json_string_value_with_default(arguments, 'emotion', minimax.default_emotion)
+
+	req := minimax.TTSRequest{
+		model: model
+		text: text
+		voice_setting: minimax.VoiceSetting{
+			voice_id: voice_id
+			speed: speed
+			vol: vol
+			pitch: pitch
+			emotion: emotion
+		}
+		audio_setting: minimax.AudioSetting{
+			sample_rate: minimax.default_sample_rate
+			bitrate: minimax.default_bitrate
+			format: minimax.default_format
+			channel: minimax.default_channel
+		}
+	}
+
+	result := m.minimax_client.text_to_audio(req)!
+	return map_to_json_string(result)
+}
+
+fn (mut m McpService) minimax_list_voices(arguments string) !string {
+	_ = arguments
+	voice_type := extract_json_string_value_with_default(arguments, 'voice_type', 'all')
+	voice_list := m.minimax_client.list_voices(voice_type)!
+
+	mut result := 'System Voices: '
+	for voice in voice_list.system_voice {
+		result += 'Name: ${voice.voice_name}, ID: ${voice.voice_id}; '
+	}
+	result += '\nVoice Cloning Voices: '
+	for voice in voice_list.voice_cloning {
+		result += 'Name: ${voice.voice_name}, ID: ${voice.voice_id}; '
+	}
+	return result
+}
+
+fn (mut m McpService) minimax_voice_clone(arguments string) !string {
+	voice_id := extract_json_string_value(arguments, 'voice_id')
+	if voice_id.len == 0 {
+		return error('voice_clone: voice_id is required')
+	}
+	file := extract_json_string_value(arguments, 'file')
+	if file.len == 0 {
+		return error('voice_clone: file is required')
+	}
+	text := extract_json_string_value(arguments, 'text')
+	if text.len == 0 {
+		return error('voice_clone: text is required')
+	}
+
+	file_content := os.read_file(file) or {
+		return error('Failed to read file: ${err}')
+	}
+
+	upload_result := m.minimax_client.upload_file(file_content, 'audio.mp3', 'audio/mpeg')!
+	file_id := upload_result['file'] or { return error('No file in upload response') }
+
+	clone_req := minimax.VoiceCloneRequest{
+		file_id: file_id
+		voice_id: voice_id
+		text: text
+	}
+
+	clone_result := m.minimax_client.voice_clone(clone_req)!
+	demo_audio := clone_result['demo_audio'] or { '' }
+	if demo_audio.len > 0 {
+		return 'Voice cloned successfully. Voice ID: ${voice_id}, demo audio URL: ${demo_audio}'
+	}
+	return 'Voice cloned successfully. Voice ID: ${voice_id}'
+}
+
+fn (mut m McpService) minimax_play_audio(arguments string) !string {
+	input_file_path := extract_json_string_value(arguments, 'input_file_path')
+	if input_file_path.len == 0 {
+		return error('play_audio: input_file_path is required')
+	}
+
+	mut play_path := input_file_path
+	if input_file_path.starts_with('http://') || input_file_path.starts_with('https://') {
+		tmpfile := os.home_dir() + '/.minimax_cli_play_audio.mp3'
+		result := os.execute('curl -s -L "${input_file_path}" -o "${tmpfile}"')
+		if result.exit_code != 0 {
+			return error('Failed to download audio: ${result.output}')
+		}
+		play_path = tmpfile
+	}
+
+	os.execute('ffplay -autoexit -nodisp "${play_path}"')
+	return 'Successfully played audio file: ${play_path}'
+}
+
+fn (mut m McpService) minimax_generate_video(arguments string) !string {
+	prompt := extract_json_string_value(arguments, 'prompt')
+	if prompt.len == 0 {
+		return error('generate_video: prompt is required')
+	}
+
+	model := extract_json_string_value_with_default(arguments, 'model', minimax.default_t2v_model)
+
+	req := minimax.VideoGenerationRequest{
+		model: model
+		prompt: prompt
+	}
+
+	result := m.minimax_client.generate_video(req)!
+	task_id := result['task_id'] or { return error('No task_id in response') }
+
+	async_mode := extract_json_bool_with_default(arguments, 'async_mode', false)
+	if async_mode {
+		return 'Video generation task submitted. Task ID: ${task_id}. Use query_video_generation to check status.'
+	}
+
+	// Poll for completion
+	mut file_id := ''
+	max_retries := 30
+
+	for _ in 0 .. max_retries {
+		status_response := m.minimax_client.query_video(task_id)!
+		status := status_response['status'] or { return error('No status in response') }
+		if status == 'Fail' {
+			return error('Video generation failed for task_id: ${task_id}')
+		}
+		if status == 'Success' {
+			file_id = status_response['file_id'] or { return error('Missing file_id') }
+			break
+		}
+		os.execute('sleep 20')
+	}
+
+	if file_id.len == 0 {
+		return error('Failed to get file_id for task_id: ${task_id}')
+	}
+
+	file_response := m.minimax_client.retrieve_file(file_id)!
+	download_url := file_response['file'] or { return error('Failed to get file') }
+	return 'Success. Video URL: ${download_url}'
+}
+
+fn (mut m McpService) minimax_query_video(arguments string) !string {
+	task_id := extract_json_string_value(arguments, 'task_id')
+	if task_id.len == 0 {
+		return error('query_video_generation: task_id is required')
+	}
+
+	result := m.minimax_client.query_video(task_id)!
+	status := result['status'] or { return error('No status in response') }
+
+	if status == 'Fail' {
+		return 'Video generation FAILED for task_id: ${task_id}'
+	}
+	if status != 'Success' {
+		return 'Video generation task is still processing: Task ID: ${task_id}'
+	}
+
+	file_id := result['file_id'] or { return error('Missing file_id') }
+	file_response := m.minimax_client.retrieve_file(file_id)!
+	download_url := file_response['file'] or { return error('Failed to get file') }
+	return 'Success. Video URL: ${download_url}'
+}
+
+fn (mut m McpService) minimax_text_to_image(arguments string) !string {
+	prompt := extract_json_string_value(arguments, 'prompt')
+	if prompt.len == 0 {
+		return error('text_to_image: prompt is required')
+	}
+
+	model := extract_json_string_value_with_default(arguments, 'model', minimax.default_t2i_model)
+	aspect_ratio := extract_json_string_value_with_default(arguments, 'aspect_ratio', '1:1')
+	n := extract_json_int_with_default(arguments, 'n', 1)
+
+	req := minimax.ImageGenerationRequest{
+		model: model
+		prompt: prompt
+		aspect_ratio: aspect_ratio
+		n: n
+		prompt_optimizer: true
+	}
+
+	result := m.minimax_client.generate_image(req)!
+	return map_to_json_string(result)
+}
+
+fn (mut m McpService) minimax_music_generation(arguments string) !string {
+	prompt := extract_json_string_value(arguments, 'prompt')
+	if prompt.len == 0 {
+		return error('music_generation: prompt is required')
+	}
+	lyrics := extract_json_string_value(arguments, 'lyrics')
+	if lyrics.len == 0 {
+		return error('music_generation: lyrics is required')
+	}
+
+	req := minimax.MusicGenerationRequest{
+		model: minimax.default_music_model
+		prompt: prompt
+		lyrics: lyrics
+		audio_setting: minimax.MusicSetting{
+			sample_rate: minimax.default_sample_rate
+			bitrate: minimax.default_bitrate
+			format: minimax.default_format
+		}
+	}
+
+	result := m.minimax_client.generate_music(req)!
+	return map_to_json_string(result)
+}
+
+fn (mut m McpService) minimax_voice_design(arguments string) !string {
+	prompt := extract_json_string_value(arguments, 'prompt')
+	if prompt.len == 0 {
+		return error('voice_design: prompt is required')
+	}
+	preview_text := extract_json_string_value(arguments, 'preview_text')
+	if preview_text.len == 0 {
+		return error('voice_design: preview_text is required')
+	}
+
+	req := minimax.VoiceDesignRequest{
+		prompt: prompt
+		preview_text: preview_text
+	}
+
+	result := m.minimax_client.design_voice(req)!
+	voice_id := result['voice_id'] or { return error('No voice_id in response') }
+	trial_audio := result['trial_audio'] or { '' }
+	if trial_audio.len > 0 {
+		return 'Success. Voice ID: ${voice_id}, Trial Audio: ${trial_audio}'
+	}
+	return 'Success. Voice ID: ${voice_id}'
+}
+
+// === Helper Functions for MiniMax ===
+
+fn map_to_json_string(m map[string]string) string {
+	mut parts := []string{}
+	for key, val in m {
+		parts << '"${key}":"${escape_json_string(val)}"'
+	}
+	return '{${parts.join(',')}}'
+}
+
+fn extract_json_string_value_with_default(json_str string, key string, default_value string) string {
+	mut val := extract_json_string_value(json_str, key)
+	if val.len == 0 {
+		val = default_value
+	}
+	return val
+}
+
+fn extract_json_int_with_default(json_str string, key string, default_value int) int {
+	pattern := '"${key}"'
+	if idx := json_str.index(pattern) {
+		mut p := idx + pattern.len
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		if p >= json_str.len || json_str[p] != `:` {
+			return default_value
+		}
+		p++
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		mut num_start := p
+		if p < json_str.len && (json_str[p] == `-` || (json_str[p] >= `0` && json_str[p] <= `9`)) {
+			p++
+		}
+		for p < json_str.len && json_str[p] >= `0` && json_str[p] <= `9` {
+			p++
+		}
+		if p > num_start {
+			val := json_str[num_start..p].trim_space()
+			if val.len > 0 {
+				return val.int()
+			}
+		}
+	}
+	return default_value
+}
+
+fn extract_json_float_with_default(json_str string, key string, default_value f64) f64 {
+	pattern := '"${key}"'
+	if idx := json_str.index(pattern) {
+		mut p := idx + pattern.len
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		if p >= json_str.len || json_str[p] != `:` {
+			return default_value
+		}
+		p++
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		mut num_start := p
+		if p < json_str.len && (json_str[p] == `-` || (json_str[p] >= `0` && json_str[p] <= `9`)) {
+			p++
+		}
+		for p < json_str.len && json_str[p] >= `0` && json_str[p] <= `9` {
+			p++
+		}
+		if p < json_str.len && json_str[p] == `.` {
+			p++
+			for p < json_str.len && json_str[p] >= `0` && json_str[p] <= `9` {
+				p++
+			}
+		}
+		if p > num_start {
+			val := json_str[num_start..p].trim_space()
+			if val.len > 0 {
+				return val.f64()
+			}
+		}
+	}
+	return default_value
+}
+
+fn extract_json_bool_with_default(json_str string, key string, default_value bool) bool {
+	pattern := '"${key}"'
+	if idx := json_str.index(pattern) {
+		mut p := idx + pattern.len
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		if p >= json_str.len || json_str[p] != `:` {
+			return default_value
+		}
+		p++
+		for p < json_str.len && json_str[p] in [u8(` `), `\t`, `\n`, `\r`] {
+			p++
+		}
+		remaining := json_str[p..]
+		if remaining.starts_with('true') {
+			return true
+		}
+		if remaining.starts_with('false') {
+			return false
+		}
+	}
+	return default_value
 }
 
 // === Server Management ===

@@ -3,6 +3,7 @@ module main
 import os
 import flag
 import time
+import minimax
 
 const version = '0.1.0'
 
@@ -41,16 +42,17 @@ pub fn (ts &ToolService) get_all_tools() []ToolDef {
 // AppContext holds all application services and configuration.
 pub struct AppContext {
 mut:
-	skills    SkillService
-	mcp       McpService
-	cron      CronService
-	memory    MemoryService
-	bash      BashService
-	tools     ToolService
-	executor  ToolExecutor
-	config    Config
-	runtime   RuntimeContext
-	workspace string
+	skills           SkillService
+	mcp              McpService
+	cron             CronService
+	memory           MemoryService
+	bash             BashService
+	tools            ToolService
+	executor         ToolExecutor
+	config           Config
+	runtime          RuntimeContext
+	workspace        string
+	minimax_client   &minimax.Client = unsafe { nil }
 }
 
 pub fn new_app_context() AppContext {
@@ -181,6 +183,26 @@ fn main() {
 	}
 
 	ctx.mcp = new_mcp_service()
+
+	// Initialize MiniMax client
+	api_key := os.getenv('MINIMAX_API_KEY')
+	if api_key.len > 0 {
+		mut host := os.getenv('MINIMAX_API_HOST')
+		if host.len == 0 {
+			host = 'https://api.minimaxi.com'
+		}
+		minimax_client := minimax.new_client(api_key, host)
+		ctx.minimax_client = &minimax_client
+		ctx.mcp.set_minimax_client(ctx.minimax_client)
+		if args.verbose {
+			println('[Main] MiniMax client initialized')
+		}
+	} else {
+		if args.verbose {
+			println('[Main] Warning: MINIMAX_API_KEY not set, MiniMax tools disabled')
+		}
+	}
+
 	ctx.mcp.start_eager_servers()
 	ctx.executor = new_tool_executor(workspace, &ctx.mcp, &ctx.skills)
 
