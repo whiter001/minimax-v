@@ -443,7 +443,7 @@ fn (mut m McpService) minimax_play_audio(arguments string) !string {
 
 	mut play_path := input_file_path
 	if input_file_path.starts_with('http://') || input_file_path.starts_with('https://') {
-		tmpfile := os.home_dir() + '/.minimax_cli_play_audio.mp3'
+		tmpfile := os.join_path(get_user_home_dir(), '.minimax_cli_play_audio.mp3')
 		result := os.execute('curl -s -L "${input_file_path}" -o "${tmpfile}"')
 		if result.exit_code != 0 {
 			return error('Failed to download audio: ${result.output}')
@@ -1324,3 +1324,4 @@ fn escape_json_string(s string) string {
 	}
 	return result.bytestr()
 }
+

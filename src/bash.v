@@ -52,6 +52,21 @@ fn find_pwsh_path() string {
 	])
 }
 
+fn find_nu_path() string {
+	mut fallback_paths := [
+		'C:\\Program Files\\nushell\\bin\\nu.exe',
+		'C:\\Program Files\\NuShell\\bin\\nu.exe',
+	]
+	if profile := os.getenv_opt('USERPROFILE') {
+		trimmed := profile.trim_space()
+		if trimmed.len > 0 {
+			fallback_paths << os.join_path(trimmed, 'AppData', 'Local', 'Programs', 'nu', 'bin',
+				'nu.exe')
+		}
+	}
+	return find_command_path('nu', fallback_paths)
+}
+
 fn extract_tool_command_head(command string) string {
 	trimmed := command.trim_space()
 	if trimmed.len == 0 {
@@ -79,14 +94,46 @@ fn should_use_windows_direct_command(command string) bool {
 		return false
 	}
 	head := extract_tool_command_head(command).to_lower()
-	return head in ['pueue', 'pueue.exe', 'pwsh', 'pwsh.exe', 'nu', 'nu.exe']
-		|| head.ends_with('\\pueue.exe') || head.ends_with('/pueue.exe')
+	return head in ['pwsh', 'pwsh.exe', 'nu', 'nu.exe']
 		|| head.ends_with('\\pwsh.exe') || head.ends_with('/pwsh.exe') || head.ends_with('\\nu.exe')
 		|| head.ends_with('/nu.exe')
 }
 
 fn escape_powershell_single_quoted(s string) string {
 	return s.replace("'", "''")
+}
+
+fn escape_nushell_single_quoted(s string) string {
+	return s.replace("'", "''")
+}
+
+fn (mut s BashService) execute_with_windows_nushell(command string) string {
+	nu_path := find_nu_path()
+	if nu_path.len == 0 {
+		return ''
+	}
+	ts := time.now().unix_milli()
+	tmp_nu := os.join_path(os.temp_dir(), 'minimax_bash_nu_${ts}.nu')
+	mut lines := [
+		"cd '${escape_nushell_single_quoted(s.cwd)}'",
+	]
+	for key, val in s.env {
+		lines << "\$env.${key} = '${escape_nushell_single_quoted(val)}'"
+	}
+	lines << command
+	lines << r'print $"__NU_CWD__=($env.PWD)"'
+	os.write_file(tmp_nu, lines.join('\n')) or {
+		return 'Error: 无法写入临时 Nushell 脚本: ${err}'
+	}
+	defer {
+		os.rm(tmp_nu) or {}
+	}
+	result := os.execute('"${nu_path}" --no-config-file --no-std-lib "${tmp_nu}"')
+	mut output := result.output
+	exit_code := result.exit_code
+
+	output = update_session_cwd_from_marker(mut s, output, '__NU_CWD__=', false)
+	return format_shell_result(exit_code, s.cwd, output)
 }
 
 fn (mut s BashService) execute_with_windows_pwsh(command string) string {
@@ -174,6 +221,16 @@ pub fn (mut s BashService) execute(command string) string {
 		|| u_cmd.contains('> AUX') || u_cmd.contains('>> NUL') || u_cmd.contains('>> CON')
 		|| u_cmd.contains('>> PRN') || u_cmd.contains('>> AUX') {
 		return 'Error: ⚠️ 禁止重定向到 Windows 保留设备 (NUL, CON, PRN, AUX)'
+	}
+
+	if os.user_os() == 'windows' {
+		head := extract_tool_command_head(command).to_lower()
+		if !head.starts_with('pwsh') && !head.starts_with('powershell') {
+			result := s.execute_with_windows_nushell(command)
+			if result.len > 0 {
+				return result
+			}
+		}
 	}
 
 	if should_use_windows_direct_command(command) {

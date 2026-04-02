@@ -5,6 +5,7 @@
 *.dylib
 minimax_cli
 minimax-v
+*.def
 
 # V language build artifacts
 .vscode/

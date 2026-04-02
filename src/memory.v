@@ -35,17 +35,7 @@ pub fn new_memory_service() MemoryService {
 
 // get_config_dir returns the minimax config directory path, creating it if needed.
 fn get_config_dir() string {
-	if custom := os.getenv_opt('MINIMAX_CONFIG_HOME') {
-		trimmed := custom.trim_space()
-		if trimmed.len > 0 {
-			if !os.is_dir(trimmed) {
-				os.mkdir_all(trimmed) or {}
-			}
-			return trimmed
-		}
-	}
-	home := os.home_dir()
-	config_home := os.join_path(home, '.config', 'minimax')
+	config_home := get_minimax_config_dir()
 	if !os.is_dir(config_home) {
 		os.mkdir_all(config_home) or {}
 	}

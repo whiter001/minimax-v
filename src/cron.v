@@ -34,7 +34,7 @@ mut:
 
 // 获取默认存储路径
 fn default_storage_path() string {
-	return os.join_path(os.home_dir(), '.config', 'minimax', 'cron_jobs.json')
+	return os.join_path(get_minimax_config_dir(), 'cron_jobs.json')
 }
 
 // 创建新的 CronService

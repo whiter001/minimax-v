@@ -105,7 +105,7 @@ fn parse_cli_args() CliArgs {
 // run_cli_mode starts the interactive CLI mode.
 fn run_cli_mode(mut ctx AppContext) {
 	println('MiniMax CLI v${version}')
-	println('Type your message or :quit to exit.')
+	println('Type `!command` to run tools in shell, or :quit to exit.')
 	println('')
 
 	for {
@@ -116,13 +116,18 @@ fn run_cli_mode(mut ctx AppContext) {
 		}
 		if input == ':quit' || input == ':exit' {
 			println('Goodbye!')
+			ctx.runtime.mark_shutting_down()
 			break
 		}
-		println('You: ${input}')
-		result := ctx.executor.execute_tool('skill', {
-			'name': ''
-		})
-		println('Bot: ${result}')
+		if input.starts_with('!') {
+			result := ctx.executor.execute_tool('bash', {
+				'command': input[1..].trim_space()
+			})
+			println(result)
+			println('')
+			continue
+		}
+		println('提示: 用 `!command` 执行命令，例如 `!v-browser open https://x.com`。')
 		println('')
 	}
 }
@@ -210,21 +215,17 @@ fn main() {
 
 	// Handle single prompt mode
 	if args.prompt.len > 0 {
-		// Directly call minimax client search
-		if isnil(ctx.minimax_client) {
-			eprintln('Error: minimax_client not initialized')
+		if config.api_key.len == 0 {
+			eprintln('Error: MINIMAX_API_KEY is not set')
 			exit(1)
 		}
-		req := minimax.SearchRequest{query: args.prompt}
+		mut api_client := new_api_client(config, ctx.executor)
 		if args.verbose {
-			println('[Main] Calling minimax search directly...')
+			println('[Main] Running prompt through agent loop...')
 		}
-		result := ctx.minimax_client.search(req) or {
-			eprintln('Search error: ${err}')
+		result := api_client.chat(args.prompt) or {
+			eprintln('Prompt error: ${err}')
 			exit(1)
-		}
-		if args.verbose {
-			println('[Main] Result: ${result}')
 		}
 		println(result)
 		exit(0)
@@ -251,5 +252,7 @@ fn main() {
 		run_cli_mode(mut ctx)
 	}
 
-	main_loop(mut ctx, args.verbose)
+	if !ctx.runtime.is_shutting_down() {
+		main_loop(mut ctx, args.verbose)
+	}
 }

@@ -28,7 +28,7 @@ fn default_config() Config {
 		api_key:       ''
 		api_url:       'https://api.minimaxi.com/anthropic/v1/messages'
 		model:         'MiniMax-M2'
-		temperature:   0.7
+		temperature:   0.4
 		max_tokens:    102400
 		max_rounds:    5000
 		token_limit:   80000
@@ -39,6 +39,15 @@ fn default_config() Config {
 }
 
 fn get_user_home_dir() string {
+	$if windows {
+		if profile := os.getenv_opt('USERPROFILE') {
+			trimmed := profile.trim_space()
+			if trimmed.len > 0 {
+				return trimmed
+			}
+		}
+		return os.home_dir()
+	}
 	if home := os.getenv_opt('HOME') {
 		trimmed := home.trim_space()
 		if trimmed.len > 0 {
@@ -60,8 +69,27 @@ fn expand_home_path(path string) string {
 	return os.join_path(home, suffix)
 }
 
+fn get_minimax_config_dir() string {
+	if custom := os.getenv_opt('MINIMAX_CONFIG_HOME') {
+		trimmed := custom.trim_space()
+		if trimmed.len > 0 {
+			return trimmed
+		}
+	}
+	$if windows {
+		if appdata := os.getenv_opt('APPDATA') {
+			trimmed := appdata.trim_space()
+			if trimmed.len > 0 {
+				return os.join_path(trimmed, 'minimax')
+			}
+		}
+		return os.join_path(get_user_home_dir(), 'AppData', 'Roaming', 'minimax')
+	}
+	return os.join_path(get_user_home_dir(), '.config', 'minimax')
+}
+
 fn get_config_path() string {
-	return expand_home_path('~/.config/minimax/config')
+	return os.join_path(get_minimax_config_dir(), 'config')
 }
 
 pub fn load_config() Config {

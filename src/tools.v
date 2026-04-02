@@ -1,5 +1,12 @@
 module main
 
+pub struct ToolUse {
+pub mut:
+	id    string
+	name  string
+	input map[string]string
+}
+
 // ToolDefinition represents a tool with its name and description.
 pub struct ToolDefinition {
 pub mut:
@@ -115,8 +122,19 @@ pub fn get_tools_schema_json() string {
 	return '[' +
 		'{"name":"bash","description":"A persistent bash shell session. Working directory and environment variables are preserved between calls.","input_schema":{"type":"object","properties":{"command":{"type":"string","description":"The bash command to execute"},"restart":{"type":"boolean","description":"Set to true to restart the bash session (reset cwd and env)"}},"required":["command"]}},' +
 		'{"name":"mcp","description":"MCP (Model Context Protocol) tool management. Use to list available MCP tools or call a specific MCP tool.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: list or call (default: list)"},"name":{"type":"string","description":"Tool name to call (for action=call)"},"arguments":{"type":"string","description":"JSON arguments for the tool call"}},"required":[]}},' +
-		'{"name":"skill","description":"Skill management. Use to activate a specialized skill or list available skills.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"Skill name to activate (e.g. coder, reviewer, architect)"}},"required":[]}},' +
+		'{"name":"skill","description":"Skill management. Use to activate a specialized skill or list available skills.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"Skill name to activate (e.g. coder, reviewer, architect)"}},"required":[]}}' +
 		']'
+}
+
+pub fn build_tool_input_json(input map[string]string) string {
+	mut parts := []string{}
+	mut keys := input.keys()
+	keys.sort()
+	for key in keys {
+		val := input[key] or { '' }
+		parts << '"${key}":"${escape_json_string(val)}"'
+	}
+	return '{' + parts.join(',') + '}'
 }
 
 // get_builtin_tool_definitions returns all builtin tool definitions.

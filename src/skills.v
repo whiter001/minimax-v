@@ -187,17 +187,13 @@ fn parse_skill_md(path string, source string) ?Skill {
 
 // Get minimax config directory
 fn minimax_config_dir() string {
-	$if windows {
-		return os.join_path(os.getenv('APPDATA'), 'minimax')
-	} $else {
-		return os.join_path(os.home_dir(), '.config', 'minimax')
-	}
+	return get_minimax_config_dir()
 }
 
 // Expand ~ in path
 fn expand_home(path string) string {
 	if path.starts_with('~/') {
-		return os.join_path(os.home_dir(), path[2..])
+		return os.join_path(get_user_home_dir(), path[2..])
 	}
 	return path
 }
