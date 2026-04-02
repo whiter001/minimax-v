@@ -336,7 +336,57 @@ pub fn (c Client) search(req SearchRequest) !map[string]string {
 	body := '{"q":"${escape_json(req.query)}"}'
 
 	resp := http_post(client.host + endpoint_search, client.api_key, body)!
-	return parse_response_map(resp)
+
+	// Check for error in response
+	base_resp_start := resp.index('"base_resp":{') or { return error('Invalid response: no base_resp') }
+	base_resp_end := find_matching_bracket(resp, base_resp_start + 11)
+	if base_resp_end > base_resp_start {
+		base_resp := resp[base_resp_start..base_resp_end + 1]
+		status_code := parse_json_int_field(base_resp, 'status_code')
+		if status_code != 0 {
+			status_msg := parse_json_string_field(base_resp, 'status_msg')
+			return error('MiniMax API error ${status_code}: ${status_msg}')
+		}
+	}
+
+	// Parse organic results
+	mut result := map[string]string{}
+	organic_start := resp.index('"organic":[') or {
+		return result
+	}
+	organic_end := find_matching_bracket(resp, organic_start + 10)
+	if organic_end > organic_start {
+		organic_content := resp[organic_start + 10..organic_end]
+		// Extract top 3 results
+		mut count := 0
+		mut pos := 0
+		for count < 3 {
+			if obj_start := organic_content.index_after('{', pos) {
+				obj_end := find_matching_bracket(organic_content, obj_start)
+				if obj_end <= obj_start {
+					break
+				}
+				obj := organic_content[obj_start..obj_end + 1]
+				title := parse_json_string_field(obj, 'title')
+				snippet := parse_json_string_field(obj, 'snippet')
+				link := parse_json_string_field(obj, 'link')
+				if title.len > 0 {
+					result['result_${count + 1}_title'] = title
+				}
+				if snippet.len > 0 {
+					result['result_${count + 1}_snippet'] = snippet
+				}
+				if link.len > 0 {
+					result['result_${count + 1}_link'] = link
+				}
+				pos = obj_end + 1
+				count++
+			} else {
+				break
+			}
+		}
+	}
+	return result
 }
 
 pub fn (c Client) vlm(req VLMRequest) !map[string]string {

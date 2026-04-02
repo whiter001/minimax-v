@@ -77,6 +77,7 @@ mut:
 	cli_mode    string
 	no_tools    bool
 	verbose     bool
+	prompt      string
 }
 
 fn parse_cli_args() CliArgs {
@@ -91,6 +92,7 @@ fn parse_cli_args() CliArgs {
 	args.cli_mode = fp.string('mode', `m`, 'cli', 'Start mode: cli or ui')
 	args.no_tools = fp.bool('no-tools', 0, false, 'Disable tool execution')
 	args.verbose = fp.bool('verbose', `v`, false, 'Enable verbose output')
+	args.prompt = fp.string('prompt', `p`, '', 'Execute a single prompt and exit')
 
 	_ = fp.finalize() or {
 		eprintln('Error parsing arguments: ${err}')
@@ -205,6 +207,28 @@ fn main() {
 
 	ctx.mcp.start_eager_servers()
 	ctx.executor = new_tool_executor(workspace, &ctx.mcp, &ctx.skills)
+
+	// Handle single prompt mode
+	if args.prompt.len > 0 {
+		// Directly call minimax client search
+		if isnil(ctx.minimax_client) {
+			eprintln('Error: minimax_client not initialized')
+			exit(1)
+		}
+		req := minimax.SearchRequest{query: args.prompt}
+		if args.verbose {
+			println('[Main] Calling minimax search directly...')
+		}
+		result := ctx.minimax_client.search(req) or {
+			eprintln('Search error: ${err}')
+			exit(1)
+		}
+		if args.verbose {
+			println('[Main] Result: ${result}')
+		}
+		println(result)
+		exit(0)
+	}
 
 	if config.enable_tools {
 		ctx.tools.register_tool('bash', 'A persistent bash shell session.', '{"type":"object"}')
