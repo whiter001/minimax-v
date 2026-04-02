@@ -1,10 +1,12 @@
 module minimax
 
 import os
+import net.http
 import encoding.base64
+import time
 
 // =============================================================================
-// Minimax API Client (using curl for HTTP)
+// Minimax API Client (using net.http for HTTP)
 // =============================================================================
 
 @[heap]
@@ -33,34 +35,49 @@ fn get_coding_plan_client() Client {
 }
 
 // =============================================================================
-// HTTP Request Helper (using curl)
+// HTTP Request Helper (using net.http)
 // =============================================================================
 
-fn curl_post(url string, api_key string, json_body string) !string {
-	tmpfile := os.temp_dir() + '/minimax_request.tmp'
-	os.write_file(tmpfile, json_body)!
+fn http_post(url string, api_key string, json_body string) !string {
+	mut h := http.new_header()
+	h.add(.authorization, 'Bearer ${api_key}')
+	h.add(.content_type, 'application/json')
 
-	defer {
-		os.rm(tmpfile) or {}
+	mut req := http.Request{
+		method: .post
+		url: url
+		header: h
+		data: json_body
+		read_timeout: 60 * time.second
+		write_timeout: 30 * time.second
 	}
 
-	result := os.execute('curl -s -X POST "${url}" -H "Authorization: Bearer ${api_key}" -H "Content-Type: application/json" -H "MM-API-Source: Minimax-CLI" -d @${tmpfile}')
-
-	if result.exit_code != 0 {
-		return error('HTTP request failed: ${result.output}')
+	resp := req.do()!
+	if resp.status_code < 200 || resp.status_code >= 300 {
+		return error('HTTP ${resp.status_code}: ${resp.body}')
 	}
 
-	return result.output
+	return resp.body
 }
 
-fn curl_get(url string, api_key string) !string {
-	result := os.execute('curl -s -X GET "${url}" -H "Authorization: Bearer ${api_key}" -H "MM-API-Source: Minimax-CLI"')
+fn http_get(url string, api_key string) !string {
+	mut h := http.new_header()
+	h.add(.authorization, 'Bearer ${api_key}')
 
-	if result.exit_code != 0 {
-		return error('HTTP request failed: ${result.output}')
+	mut req := http.Request{
+		method: .get
+		url: url
+		header: h
+		read_timeout: 60 * time.second
+		write_timeout: 30 * time.second
 	}
 
-	return result.output
+	resp := req.do()!
+	if resp.status_code < 200 || resp.status_code >= 300 {
+		return error('HTTP ${resp.status_code}: ${resp.body}')
+	}
+
+	return resp.body
 }
 
 // =============================================================================
@@ -115,14 +132,14 @@ fn parse_json_int_field(json string, key string) int {
 pub fn (c Client) text_to_audio(req TTSRequest) !map[string]string {
 	body := '{"model":"${req.model}","text":"${escape_json(req.text)}","voice_setting":{"voice_id":"${req.voice_setting.voice_id}","speed":${req.voice_setting.speed},"vol":${req.voice_setting.vol},"pitch":${req.voice_setting.pitch},"emotion":"${req.voice_setting.emotion}"},"audio_setting":{"sample_rate":${req.audio_setting.sample_rate},"bitrate":${req.audio_setting.bitrate},"format":"${req.audio_setting.format}","channel":${req.audio_setting.channel}}}'
 
-	resp := curl_post(c.host + endpoint_t2a_v2, c.api_key, body)!
+	resp := http_post(c.host + endpoint_t2a_v2, c.api_key, body)!
 	return parse_response_map(resp)
 }
 
 pub fn (c Client) list_voices(voice_type string) !VoiceList {
 	body := '{"voice_type":"${voice_type}"}'
 
-	resp := curl_post(c.host + endpoint_get_voice, c.api_key, body)!
+	resp := http_post(c.host + endpoint_get_voice, c.api_key, body)!
 
 	mut voice_list := VoiceList{}
 
@@ -215,7 +232,7 @@ fn find_matching_bracket(s string, start int) int {
 pub fn (c Client) voice_clone(req VoiceCloneRequest) !map[string]string {
 	body := '{"file_id":"${req.file_id}","voice_id":"${req.voice_id}","text":"${escape_json(req.text)}"}'
 
-	resp := curl_post(c.host + endpoint_voice_clone, c.api_key, body)!
+	resp := http_post(c.host + endpoint_voice_clone, c.api_key, body)!
 	return parse_response_map(resp)
 }
 
@@ -227,21 +244,39 @@ pub:
 }
 
 pub fn (c Client) upload_file(file_data string, filename string, mimetype string) !map[string]string {
-	// Use multipart form upload via curl
-	tmpfile := os.temp_dir() + '/minimax_upload.tmp'
-	os.write_file(tmpfile, file_data)!
+	// Use net.http multipart form upload
+	boundary := '----WebKitFormBoundary7MA4YWxkTrZu0gW'
 
-	defer {
-		os.rm(tmpfile) or {}
+	// 构建 multipart body
+	mut body := '--${boundary}\r\n'
+	body += 'Content-Disposition: form-data; name="file"; filename="${filename}"\r\n'
+	body += 'Content-Type: ${mimetype}\r\n\r\n'
+	body += file_data
+	body += '\r\n'
+	body += '--${boundary}\r\n'
+	body += 'Content-Disposition: form-data; name="purpose"\r\n\r\n'
+	body += 'voice_clone\r\n'
+	body += '--${boundary}--\r\n'
+
+	mut h := http.new_header()
+	h.add(.authorization, 'Bearer ${c.api_key}')
+	h.add(.content_type, 'multipart/form-data; boundary=${boundary}')
+
+	mut req := http.Request{
+		method: .post
+		url: c.host + endpoint_files_upload
+		header: h
+		data: body
+		read_timeout: 60 * time.second
+		write_timeout: 30 * time.second
 	}
 
-	result := os.execute('curl -s -X POST "${c.host}${endpoint_files_upload}" -H "Authorization: Bearer ${c.api_key}" -H "MM-API-Source: Minimax-CLI" -F "file=@${tmpfile};type=${mimetype}" -F "purpose=voice_clone"')
-
-	if result.exit_code != 0 {
-		return error('Upload failed: ${result.output}')
+	resp := req.do()!
+	if resp.status_code < 200 || resp.status_code >= 300 {
+		return error('Upload failed: ${resp.status_code}')
 	}
 
-	return parse_response_map(result.output)
+	return parse_response_map(resp.body)
 }
 
 pub fn (c Client) generate_video(req VideoGenerationRequest) !map[string]string {
@@ -257,31 +292,31 @@ pub fn (c Client) generate_video(req VideoGenerationRequest) !map[string]string 
 	}
 	body += '}'
 
-	resp := curl_post(c.host + endpoint_video_generation, c.api_key, body)!
+	resp := http_post(c.host + endpoint_video_generation, c.api_key, body)!
 	return parse_response_map(resp)
 }
 
 pub fn (c Client) query_video(task_id string) !map[string]string {
-	resp := curl_get(c.host + endpoint_video_generation + '?task_id=' + task_id, c.api_key)!
+	resp := http_get(c.host + endpoint_video_generation + '?task_id=' + task_id, c.api_key)!
 	return parse_response_map(resp)
 }
 
 pub fn (c Client) retrieve_file(file_id string) !map[string]string {
-	resp := curl_get(c.host + endpoint_files_retrieve + '?file_id=' + file_id, c.api_key)!
+	resp := http_get(c.host + endpoint_files_retrieve + '?file_id=' + file_id, c.api_key)!
 	return parse_response_map(resp)
 }
 
 pub fn (c Client) generate_image(req ImageGenerationRequest) !map[string]string {
 	body := '{"model":"${req.model}","prompt":"${escape_json(req.prompt)}","aspect_ratio":"${req.aspect_ratio}","n":${req.n},"prompt_optimizer":${req.prompt_optimizer}}'
 
-	resp := curl_post(c.host + endpoint_image_generation, c.api_key, body)!
+	resp := http_post(c.host + endpoint_image_generation, c.api_key, body)!
 	return parse_response_map(resp)
 }
 
 pub fn (c Client) generate_music(req MusicGenerationRequest) !map[string]string {
 	body := '{"model":"${req.model}","prompt":"${escape_json(req.prompt)}","lyrics":"${escape_json(req.lyrics)}","audio_setting":{"sample_rate":${req.audio_setting.sample_rate},"bitrate":${req.audio_setting.bitrate},"format":"${req.audio_setting.format}"}}'
 
-	resp := curl_post(c.host + endpoint_music_generation, c.api_key, body)!
+	resp := http_post(c.host + endpoint_music_generation, c.api_key, body)!
 	return parse_response_map(resp)
 }
 
@@ -292,7 +327,7 @@ pub fn (c Client) design_voice(req VoiceDesignRequest) !map[string]string {
 	}
 	body += '}'
 
-	resp := curl_post(c.host + endpoint_voice_design, c.api_key, body)!
+	resp := http_post(c.host + endpoint_voice_design, c.api_key, body)!
 	return parse_response_map(resp)
 }
 
@@ -300,7 +335,7 @@ pub fn (c Client) search(req SearchRequest) !map[string]string {
 	client := get_coding_plan_client()
 	body := '{"q":"${escape_json(req.query)}"}'
 
-	resp := curl_post(client.host + endpoint_search, client.api_key, body)!
+	resp := http_post(client.host + endpoint_search, client.api_key, body)!
 	return parse_response_map(resp)
 }
 
@@ -308,7 +343,7 @@ pub fn (c Client) vlm(req VLMRequest) !map[string]string {
 	client := get_coding_plan_client()
 	body := '{"prompt":"${escape_json(req.prompt)}","image_url":"${escape_json(req.image_url)}"}'
 
-	resp := curl_post(client.host + endpoint_vlm, client.api_key, body)!
+	resp := http_post(client.host + endpoint_vlm, client.api_key, body)!
 	return parse_response_map(resp)
 }
 
