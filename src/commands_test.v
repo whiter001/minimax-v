@@ -2,11 +2,15 @@ module main
 
 import os
 
-fn reset_command_registry_for_test() {
-	command_registry.commands = []
-	command_registry.loaded = false
-	command_registry.workspace = ''
+fn new_test_command_registry(workspace string) CommandRegistry {
+	return CommandRegistry{
+		commands:  []CustomCommand{}
+		loaded:    true
+		workspace: workspace
+	}
 }
+
+fn reset_command_registry_for_test() {}
 
 fn test_command_name_from_toml_path_namespaced() {
 	root := os.join_path('C:\\tmp', 'commands')
@@ -40,6 +44,7 @@ fn test_parse_command_toml_multiline_prompt() {
 
 fn test_load_custom_commands_from_dir_subdirs() {
 	reset_command_registry_for_test()
+	mut registry := new_test_command_registry('')
 	base := os.join_path(os.temp_dir(), '__minimax_command_discovery__')
 	os.rmdir_all(base) or {}
 	os.mkdir_all(os.join_path(base, 'fs')) or {}
@@ -51,29 +56,30 @@ fn test_load_custom_commands_from_dir_subdirs() {
 		return
 	}
 
-	load_custom_commands_from_dir(base, 'project', '')
-	assert command_registry.commands.len == 1
-	assert command_registry.commands[0].name == 'fs:grep-code'
-	assert command_registry.commands[0].source == 'project'
+	load_custom_commands_from_dir(base, 'project', '', mut registry)
+	assert registry.commands.len == 1
+	assert registry.commands[0].name == 'fs:grep-code'
+	assert registry.commands[0].source == 'project'
 }
 
 fn test_add_or_override_custom_command_priority() {
 	reset_command_registry_for_test()
-	add_or_override_custom_command(CustomCommand{
+	mut registry := new_test_command_registry('')
+	add_or_override_custom_command(mut registry, CustomCommand{
 		name:        'git:commit'
 		description: 'builtin'
 		prompt:      'p1'
 		source:      'builtin'
 	})
-	add_or_override_custom_command(CustomCommand{
+	add_or_override_custom_command(mut registry, CustomCommand{
 		name:        'git:commit'
 		description: 'project override'
 		prompt:      'p2'
 		source:      'project'
 	})
-	assert command_registry.commands.len == 1
-	assert command_registry.commands[0].description == 'project override'
-	assert command_registry.commands[0].source == 'project'
+	assert registry.commands.len == 1
+	assert registry.commands[0].description == 'project override'
+	assert registry.commands[0].source == 'project'
 }
 
 fn test_parse_custom_command_invocation_with_args() {
@@ -90,6 +96,7 @@ fn test_render_custom_command_prompt_args_and_file_injection() {
 	os.rmdir_all(dir) or {}
 	os.mkdir_all(dir) or {}
 	defer { os.rmdir_all(dir) or {} }
+	mut bash_session := new_bash_session(dir)
 
 	sample := os.join_path(dir, 'sample.txt')
 	os.write_file(sample, 'file-content') or {
@@ -103,7 +110,7 @@ fn test_render_custom_command_prompt_args_and_file_injection() {
 		prompt:      'Target: {{args}}\n\n@{ sample.txt }'
 		source:      'project'
 	}
-	rendered := render_custom_command_prompt(cmd, 'sample.txt', dir, false) or {
+	rendered := render_custom_command_prompt(cmd, 'sample.txt', dir, false, mut bash_session) or {
 		assert false
 		return
 	}
@@ -113,13 +120,14 @@ fn test_render_custom_command_prompt_args_and_file_injection() {
 }
 
 fn test_render_custom_command_prompt_missing_file_error() {
+	mut bash_session := new_bash_session('')
 	cmd := CustomCommand{
 		name:        'review:file'
 		description: 'review'
 		prompt:      '@{ no-such-file.txt }'
 		source:      'project'
 	}
-	if _ := render_custom_command_prompt(cmd, '', '', false) {
+	if _ := render_custom_command_prompt(cmd, '', '', false, mut bash_session) {
 		assert false, 'should fail when injected path does not exist'
 	}
 }
@@ -165,7 +173,8 @@ fn test_parse_manifest_mcp_servers_top_level_keys() {
 
 fn test_load_extension_command_conflict_prefixed() {
 	reset_command_registry_for_test()
-	add_or_override_custom_command(CustomCommand{
+	mut registry := new_test_command_registry('')
+	add_or_override_custom_command(mut registry, CustomCommand{
 		name:        'fs:grep-code'
 		description: 'user command'
 		prompt:      'user prompt'
@@ -183,11 +192,11 @@ fn test_load_extension_command_conflict_prefixed() {
 		return
 	}
 
-	load_custom_commands_from_dir(ext_dir, 'extension', 'my-ext')
+	load_custom_commands_from_dir(ext_dir, 'extension', 'my-ext', mut registry)
 	mut original_source := ''
 	mut prefixed_source := ''
 	mut prefixed_prompt := ''
-	for cmd in command_registry.commands {
+	for cmd in registry.commands {
 		if cmd.name == 'fs:grep-code' {
 			original_source = cmd.source
 		}

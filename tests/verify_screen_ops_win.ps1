@@ -108,7 +108,7 @@ Write-Pass "检测到 API Key 配置"
 
 if (-not $SkipBuild) {
 	Write-Step "编译 minimax_cli.exe"
-	$buildOut = & v -enable-globals -o minimax_cli.exe src 2>&1
+	$buildOut = & v -o minimax_cli.exe src 2>&1
 	if ($LASTEXITCODE -eq 0 -and (Test-Path $Binary)) {
 		Write-Pass "编译成功"
 	} else {

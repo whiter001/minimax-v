@@ -313,33 +313,28 @@ fn test_mcp_start_does_not_load_external_mcp_config() {
 	assert action == .continue_loop
 	assert client.mcp_manager.servers.len == 1
 	assert client.mcp_manager.servers[0].name == 'MiniMax'
+	client.mcp_manager.stop_all()
 }
 
 fn test_handle_interactive_prefixed_command_skill_switches_prompt() {
-	old_skills := skill_registry.skills.clone()
-	old_active := skill_registry.active_skill
-	old_loaded := skill_registry.loaded
-	skill_registry.skills = [
-		Skill{
-			name:        'test-skill'
-			description: 'test description'
-			prompt:      'follow the test prompt'
-			source:      'builtin'
-			path:        ''
-		},
-	]
-	skill_registry.active_skill = ''
-	skill_registry.loaded = true
-	mut client := new_api_client(default_config())
+	workspace := os.join_path(os.temp_dir(), '__minimax_skill_switch__')
+	os.rmdir_all(workspace) or {}
+	os.mkdir_all(os.join_path(workspace, '.agents', 'skills', 'test-skill')) or {}
+	os.write_file(os.join_path(workspace, '.agents', 'skills', 'test-skill', 'SKILL.md'),
+		'---\nname: test-skill\ndescription: test description\n---\n\nfollow the test prompt') or {
+		assert false
+		return
+	}
+	defer { os.rmdir_all(workspace) or {} }
+	mut config := default_config()
+	config.workspace = workspace
+	mut client := new_api_client(config)
 	client.enable_tools = false
 	action := handle_interactive_prefixed_command(mut client, 'skill test-skill')
 	assert action == .continue_loop
 	assert client.system_prompt == 'follow the test prompt'
 	assert client.enable_tools
-	assert skill_registry.active_skill == 'test-skill'
-	skill_registry.skills = old_skills
-	skill_registry.active_skill = old_active
-	skill_registry.loaded = old_loaded
+	assert client.current_skill == 'test-skill'
 }
 
 fn test_handle_interactive_prefixed_command_unknown_is_not_handled() {

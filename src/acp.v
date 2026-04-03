@@ -168,7 +168,7 @@ fn clone_acp_client(template ApiClient, workspace string) ApiClient {
 	client.trajectory = new_trajectory_recorder(false)
 	client.logger = new_logger(false)
 	client.mcp_manager = new_mcp_manager()
-	bash_session = new_bash_session(workspace)
+	client.bash_session = new_bash_session(workspace)
 	return client
 }
 

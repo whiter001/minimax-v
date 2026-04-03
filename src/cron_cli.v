@@ -352,8 +352,6 @@ fn build_cron_stats_text(stats map[string]int) string {
 // Timer 定时器（类似 JS setTimeout/setInterval）
 // ──────────────────────────────────────────────
 
-__global g_timer_manager = TimerManager{}
-
 fn timer_storage_path() string {
 	return os.join_path(get_minimax_config_dir(), 'timers.json')
 }
@@ -365,7 +363,7 @@ fn ensure_timer_storage() ! {
 	}
 }
 
-fn load_timers() ! {
+fn load_timers(mut mgr TimerManager) ! {
 	ensure_timer_storage()!
 	path := timer_storage_path()
 	if !os.exists(path) {
@@ -379,14 +377,14 @@ fn load_timers() ! {
 		return error('定时器文件(${path})损坏，无法加载: ${err}')
 	}
 	for timer in timers {
-		g_timer_manager.timers[timer.id] = timer
+		mgr.timers[timer.id] = timer
 	}
 }
 
-fn save_timers() ! {
+fn save_timers(mgr TimerManager) ! {
 	ensure_timer_storage()!
 	mut timer_list := []Timer{}
-	for _, timer in g_timer_manager.timers {
+	for _, timer in mgr.timers {
 		timer_list << timer
 	}
 	data := json.encode(timer_list)
@@ -482,7 +480,7 @@ fn timer_create(mut mgr TimerManager, name string, seconds int, command string, 
 			return '❌ 创建 setTimeout 失败: ${err}', 1
 		}
 	}
-	save_timers() or { return '❌ 定时器已创建但保存失败: ${err}', 1 }
+	save_timers(mgr) or { return '❌ 定时器已创建但保存失败: ${err}', 1 }
 	type_label := if is_interval { 'setInterval' } else { 'setTimeout' }
 	return '✅ ${type_label} 已创建\n' + build_timer_text(timer), 0
 }
@@ -523,12 +521,12 @@ fn timer_cmd_clear(args []string, mut mgr TimerManager) (string, int) {
 	}
 	target := args[1]
 	if mgr.clear_timer(target) {
-		save_timers() or { return '✅ 已取消但保存失败: ${err}', 1 }
+		save_timers(mgr) or { return '✅ 已取消但保存失败: ${err}', 1 }
 		return '✅ 已取消定时器: ${target}', 0
 	}
 	removed := mgr.clear_timer_by_name(target)
 	if removed > 0 {
-		save_timers() or { return '✅ 已取消 ${removed} 个但保存失败: ${err}', 1 }
+		save_timers(mgr) or { return '✅ 已取消 ${removed} 个但保存失败: ${err}', 1 }
 		return '✅ 已取消 ${removed} 个名为 "${target}" 的定时器', 0
 	}
 	return '❌ 未找到定时器: ${target}', 1
@@ -557,13 +555,13 @@ fn timer_format_tick_result(executed []string, had_failure bool) (string, int) {
 // 单次 tick
 fn timer_cmd_tick(mut mgr TimerManager) (string, int) {
 	executed, had_failure := mgr.tick_execute(execute_timer_job)
-	save_timers() or { return '❌ 保存定时器失败: ${err}', 1 }
+	save_timers(mgr) or { return '❌ 保存定时器失败: ${err}', 1 }
 	return timer_format_tick_result(executed, had_failure)
 }
 
 // 持续运行
 fn timer_cmd_run(mut mgr TimerManager) (string, int) {
-	load_timers() or { return '❌ 加载定时器失败: ${err}', 1 }
+	load_timers(mut mgr) or { return '❌ 加载定时器失败: ${err}', 1 }
 	println('Timer runner 已启动，Ctrl+C 退出')
 	for {
 		executed, had_failure := mgr.tick_execute(execute_timer_job)
@@ -571,7 +569,7 @@ fn timer_cmd_run(mut mgr TimerManager) (string, int) {
 			msg, _ := timer_format_tick_result(executed, had_failure)
 			println(msg)
 		}
-		save_timers() or { return '❌ 保存定时器失败: ${err}', 1 }
+		save_timers(mgr) or { return '❌ 保存定时器失败: ${err}', 1 }
 		time.sleep(1 * time.second)
 	}
 	return '', 0
@@ -582,7 +580,7 @@ fn execute_timer_command(args []string, mut mgr TimerManager) (string, int) {
 		return timer_help_text(), 0
 	}
 
-	load_timers() or { return '❌ 加载定时器失败: ${err}', 1 }
+	load_timers(mut mgr) or { return '❌ 加载定时器失败: ${err}', 1 }
 
 	match args[0] {
 		'help' {
@@ -814,7 +812,8 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			return '✅ Cron daemon 已启动', 0
 		}
 		'timer' {
-			return execute_timer_command(args[1..], mut g_timer_manager)
+			mut timer_manager := new_timer_manager()
+			return execute_timer_command(args[1..], mut timer_manager)
 		}
 		else {
 			return '未知 cron 命令: ${args[0]}\n\n' + cron_help_text(), 2

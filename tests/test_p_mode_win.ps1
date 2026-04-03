@@ -318,7 +318,7 @@ if ($vCmd) {
     )
     foreach ($t in $vTests) {
         if (Test-Path $t.File) {
-            $vOut = & v -enable-globals test $t.File 2>&1 | Out-String
+            $vOut = & v test $t.File 2>&1 | Out-String
             if ($LASTEXITCODE -eq 0) {
                 $passed = if ($vOut -match '(\d+) passed') { $Matches[1] } else { '?' }
                 Write-Pass "$($t.Name) 单元测试通过 ($passed passed)"

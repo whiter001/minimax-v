@@ -34,73 +34,78 @@ mut:
 	initial_prompt       string
 }
 
-__global g_term_ui_app = &TermUiApp(unsafe { nil })
-__global g_term_ui_enabled = false
-
-fn term_ui_is_active() bool {
-	return g_term_ui_enabled && g_term_ui_app != unsafe { nil }
+fn (c &ApiClient) term_ui_is_active() bool {
+	app := c.term_ui_app
+	return c.term_ui_enabled && app != unsafe { nil }
 }
 
-fn term_ui_set_status(text string) {
-	if !term_ui_is_active() {
+fn (c &ApiClient) term_ui_set_status(text string) {
+	app := c.term_ui_app
+	if !c.term_ui_enabled || app == unsafe { nil } {
 		return
 	}
 	unsafe {
-		g_term_ui_app.set_status(text)
+		app.set_status(text)
 	}
 }
 
-fn term_ui_clear_status() {
-	if !term_ui_is_active() {
+fn (c &ApiClient) term_ui_clear_status() {
+	app := c.term_ui_app
+	if !c.term_ui_enabled || app == unsafe { nil } {
 		return
 	}
 	unsafe {
-		g_term_ui_app.clear_status()
+		app.clear_status()
 	}
 }
 
-fn term_ui_append_stream_text(text string) {
-	if !term_ui_is_active() || text.len == 0 {
+fn (c &ApiClient) term_ui_append_stream_text(text string) {
+	app := c.term_ui_app
+	if !c.term_ui_enabled || app == unsafe { nil } || text.len == 0 {
 		return
 	}
 	unsafe {
-		g_term_ui_app.append_stream_text(text)
+		app.append_stream_text(text)
 	}
 }
 
-fn term_ui_append_thinking(text string) {
-	if !term_ui_is_active() || text.len == 0 {
+fn (c &ApiClient) term_ui_append_thinking(text string) {
+	app := c.term_ui_app
+	if !c.term_ui_enabled || app == unsafe { nil } || text.len == 0 {
 		return
 	}
 	unsafe {
-		g_term_ui_app.append_thinking(text)
+		app.append_thinking(text)
 	}
 }
 
-fn term_ui_add_activity(text string) {
-	if !term_ui_is_active() || text.len == 0 {
+fn (c &ApiClient) term_ui_add_activity(text string) {
+	app := c.term_ui_app
+	if !c.term_ui_enabled || app == unsafe { nil } || text.len == 0 {
 		return
 	}
 	unsafe {
-		g_term_ui_app.add_activity(text)
+		app.add_activity(text)
 	}
 }
 
-fn term_ui_add_tool_result(name string, result string) {
-	if !term_ui_is_active() {
+fn (c &ApiClient) term_ui_add_tool_result(name string, result string) {
+	app := c.term_ui_app
+	if !c.term_ui_enabled || app == unsafe { nil } {
 		return
 	}
 	unsafe {
-		g_term_ui_app.add_tool_result(name, result)
+		app.add_tool_result(name, result)
 	}
 }
 
-fn term_ui_ask_user(question string) string {
-	if !term_ui_is_active() {
+fn (c &ApiClient) term_ui_ask_user(question string) string {
+	app := c.term_ui_app
+	if !c.term_ui_enabled || app == unsafe { nil } {
 		return 'Error: term-ui is inactive'
 	}
 	unsafe {
-		return g_term_ui_app.wait_for_user_answer(question)
+		return app.wait_for_user_answer(question)
 	}
 }
 
@@ -567,13 +572,15 @@ fn start_term_ui(mut client ApiClient, skill_name string, initial_prompt string)
 		skill_name:     skill_name
 		initial_prompt: initial_prompt.trim_space()
 	}
-	unsafe {
-		g_term_ui_app = app
-	}
-	g_term_ui_enabled = true
+	client.term_ui_app = app
+	client.term_ui_enabled = true
+	app.client.term_ui_app = app
+	app.client.term_ui_enabled = true
 	defer {
-		g_term_ui_enabled = false
-		g_term_ui_app = unsafe { nil }
+		client.term_ui_enabled = false
+		client.term_ui_app = unsafe { nil }
+		app.client.term_ui_enabled = false
+		app.client.term_ui_app = unsafe { nil }
 	}
 
 	app.ctx = tui.init(

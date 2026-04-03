@@ -61,8 +61,6 @@ mut:
 	max_files        int
 }
 
-__global command_registry = CommandRegistry{}
-
 fn command_source_priority(source string) int {
 	return match source {
 		'project' { 4 }
@@ -72,50 +70,55 @@ fn command_source_priority(source string) int {
 	}
 }
 
-fn init_command_registry(workspace string) {
-	if command_registry.loaded && command_registry.workspace == workspace {
-		return
+fn load_command_registry(workspace string) CommandRegistry {
+	mut registry := CommandRegistry{
+		commands:  []CustomCommand{}
+		loaded:    true
+		workspace: workspace
 	}
-	reload_command_registry(workspace)
-}
-
-fn reload_command_registry(workspace string) {
-	command_registry.commands = []
-	command_registry.workspace = workspace
 
 	for cmd in get_builtin_custom_commands() {
-		add_or_override_custom_command(cmd)
+		add_or_override_custom_command(mut registry, cmd)
 	}
 
-	load_custom_commands_from_dir(get_user_commands_dir(), 'user', '')
+	load_custom_commands_from_dir(get_user_commands_dir(), 'user', '', mut registry)
 	if workspace.len > 0 {
 		load_custom_commands_from_dir(os.join_path(workspace, '.minimax', 'commands'),
-			'project', '')
+			'project', '', mut registry)
 	}
 
 	for ext in discover_extensions() {
 		if ext.enabled && os.is_dir(ext.commands_dir) {
-			load_custom_commands_from_dir(ext.commands_dir, 'extension', ext.name)
+			load_custom_commands_from_dir(ext.commands_dir, 'extension', ext.name, mut
+				registry)
 		}
 	}
 
-	command_registry.loaded = true
+	return registry
 }
 
-fn add_or_override_custom_command(new_cmd CustomCommand) {
-	for i, existing in command_registry.commands {
+fn init_command_registry(workspace string) CommandRegistry {
+	return load_command_registry(workspace)
+}
+
+fn reload_command_registry(workspace string) CommandRegistry {
+	return load_command_registry(workspace)
+}
+
+fn add_or_override_custom_command(mut registry CommandRegistry, new_cmd CustomCommand) {
+	for i, existing in registry.commands {
 		if existing.name == new_cmd.name {
 			if command_source_priority(new_cmd.source) >= command_source_priority(existing.source) {
-				command_registry.commands[i] = new_cmd
+				registry.commands[i] = new_cmd
 			}
 			return
 		}
 	}
-	command_registry.commands << new_cmd
+	registry.commands << new_cmd
 }
 
-fn command_name_exists(name string) bool {
-	for cmd in command_registry.commands {
+fn command_name_exists(commands []CustomCommand, name string) bool {
+	for cmd in commands {
 		if cmd.name == name {
 			return true
 		}
@@ -137,14 +140,14 @@ fn build_extension_prefixed_name(extension_name string, base_name string) string
 	return 'ext:${sanitize_extension_name(extension_name)}:${base_name}'
 }
 
-fn ensure_unique_command_name(base_name string) string {
-	if !command_name_exists(base_name) {
+fn ensure_unique_command_name(commands []CustomCommand, base_name string) string {
+	if !command_name_exists(commands, base_name) {
 		return base_name
 	}
 	mut i := 2
 	for {
 		candidate := '${base_name}-${i}'
-		if !command_name_exists(candidate) {
+		if !command_name_exists(commands, candidate) {
 			return candidate
 		}
 		i++
@@ -153,15 +156,15 @@ fn ensure_unique_command_name(base_name string) string {
 }
 
 fn get_all_custom_commands(workspace string) []CustomCommand {
-	init_command_registry(workspace)
-	mut cmds := command_registry.commands.clone()
+	registry := load_command_registry(workspace)
+	mut cmds := registry.commands.clone()
 	cmds.sort(a.name < b.name)
 	return cmds
 }
 
 fn find_custom_command(workspace string, name string) ?CustomCommand {
-	init_command_registry(workspace)
-	for cmd in command_registry.commands {
+	registry := load_command_registry(workspace)
+	for cmd in registry.commands {
 		if cmd.name == name {
 			return cmd
 		}
@@ -201,7 +204,7 @@ fn command_name_from_toml_path(root string, full_path string) string {
 	return normalized_path.trim_left('/').trim_right('/').replace('/', ':')
 }
 
-fn load_custom_commands_from_dir(dir string, source string, extension_name string) {
+fn load_custom_commands_from_dir(dir string, source string, extension_name string, mut registry CommandRegistry) {
 	if !os.is_dir(dir) {
 		return
 	}
@@ -212,12 +215,13 @@ fn load_custom_commands_from_dir(dir string, source string, extension_name strin
 		if name.len == 0 {
 			continue
 		}
-		if source == 'extension' && extension_name.len > 0 && command_name_exists(name) {
-			name = ensure_unique_command_name(build_extension_prefixed_name(extension_name,
+		if source == 'extension' && extension_name.len > 0
+			&& command_name_exists(registry.commands, name) {
+			name = ensure_unique_command_name(registry.commands, build_extension_prefixed_name(extension_name,
 				name))
 		}
 		if cmd := parse_command_toml(path, name, source, extension_name) {
-			add_or_override_custom_command(cmd)
+			add_or_override_custom_command(mut registry, cmd)
 		}
 	}
 }
@@ -342,9 +346,9 @@ fn parse_custom_command_invocation(input string) !(string, string) {
 	return body, ''
 }
 
-fn render_custom_command_prompt(cmd CustomCommand, args string, workspace string, interactive bool) !string {
+fn render_custom_command_prompt(cmd CustomCommand, args string, workspace string, interactive bool, mut bash_session BashSession) !string {
 	mut rendered := cmd.prompt.replace('{{args}}', args)
-	rendered = process_shell_injections(rendered, interactive)!
+	rendered = process_shell_injections(rendered, interactive, mut bash_session)!
 	rendered = process_file_injections(rendered, workspace)!
 	if rendered.len > max_command_prompt_chars {
 		return error('命令渲染后内容过长 (${rendered.len} chars)，请缩小输入范围')
@@ -352,7 +356,7 @@ fn render_custom_command_prompt(cmd CustomCommand, args string, workspace string
 	return rendered.trim_space()
 }
 
-fn process_shell_injections(input string, interactive bool) !string {
+fn process_shell_injections(input string, interactive bool, mut bash_session BashSession) !string {
 	mut rendered := input
 	for {
 		start := rendered.index('!{') or { break }
@@ -590,7 +594,7 @@ fn execute_custom_command(mut client ApiClient, input string, interactive bool) 
 		return error('未知命令: /${name}，可用命令请执行 "commands list"')
 	}
 	rendered := render_custom_command_prompt(cmd, args, client.workspace, interactive
-		&& !client.silent_mode)!
+		&& !client.silent_mode, mut client.bash_session)!
 	if client.debug && !client.silent_mode {
 		println('\x1b[2m[command] /${name} (${rendered.len} chars)\x1b[0m')
 	}
@@ -1178,7 +1182,6 @@ fn install_extension_from_path(source_path string) string {
 	disabled.delete(manifest.name)
 	write_disabled_extensions(disabled) or {}
 
-	reload_command_registry(command_registry.workspace)
 	return if source_kind == 'git' {
 		'✅ 已安装扩展: ${manifest.name} (git: ${source_ref})'
 	} else {
@@ -1212,7 +1215,6 @@ fn set_extension_enabled(name string, enabled bool) string {
 	write_disabled_extensions(disabled) or {
 		return 'Error: 无法更新扩展状态: ${err.msg()}'
 	}
-	reload_command_registry(command_registry.workspace)
 	return if enabled { '✅ 扩展已启用: ${target}' } else { '✅ 扩展已禁用: ${target}' }
 }
 
@@ -1235,7 +1237,6 @@ fn uninstall_extension(name string) string {
 	disabled.delete(target)
 	write_disabled_extensions(disabled) or {}
 
-	reload_command_registry(command_registry.workspace)
 	return '✅ 已卸载扩展: ${target}'
 }
 
@@ -1278,7 +1279,6 @@ fn update_extension(name string) string {
 	write_extension_state(ext.root_dir, source_path, source_kind, source_ref) or {
 		return 'Error: 更新后写入元数据失败: ${err.msg()}'
 	}
-	reload_command_registry(command_registry.workspace)
 	return '✅ 扩展已更新: ${target}'
 }
 

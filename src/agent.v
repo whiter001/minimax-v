@@ -96,10 +96,10 @@ fn step_state_name(state AgentStepState) string {
 }
 
 fn print_step_status(mut c ApiClient, step AgentStep) {
-	if runtime_is_acp_mode() {
+	if c.acp_mode {
 		return
 	}
-	if term_ui_is_active() {
+	if c.term_ui_is_active() {
 		elapsed := if step.end_time > 0 {
 			f64(step.end_time - step.start_time) / 1000.0
 		} else {
@@ -109,7 +109,7 @@ fn print_step_status(mut c ApiClient, step AgentStep) {
 		if elapsed > 0 {
 			summary += ' (${elapsed:.1f}s)'
 		}
-		term_ui_add_activity(summary)
+		c.term_ui_add_activity(summary)
 		return
 	}
 	c.clear_phase_status_line()

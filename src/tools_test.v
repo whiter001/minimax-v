@@ -158,6 +158,7 @@ fn test_execute_tool_use_read_file() {
 	test_path := '/tmp/__minimax_test_exec__.txt'
 	os.write_file(test_path, 'exec test') or {}
 	defer { os.rm(test_path) or {} }
+	mut bash_session := new_bash_session('')
 
 	tool := ToolUse{
 		id:    'tu_1'
@@ -166,7 +167,8 @@ fn test_execute_tool_use_read_file() {
 			'path': test_path
 		}
 	}
-	result := execute_tool_use_in_workspace(tool, '', default_config())
+	result := execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(),
+		false, false, unsafe { nil })
 	assert result == 'exec test'
 }
 
@@ -175,6 +177,7 @@ fn test_execute_tool_use_with_workspace() {
 	os.mkdir(test_dir) or {}
 	os.write_file(os.join_path(test_dir, 'hello.txt'), 'workspace file') or {}
 	defer { os.rmdir_all(test_dir) or {} }
+	mut bash_session := new_bash_session(test_dir)
 
 	tool := ToolUse{
 		id:    'tu_1'
@@ -183,7 +186,8 @@ fn test_execute_tool_use_with_workspace() {
 			'path': 'hello.txt'
 		}
 	}
-	result := execute_tool_use_in_workspace(tool, test_dir, default_config())
+	result := execute_tool_use_in_workspace(mut bash_session, tool, test_dir, default_config(),
+		false, false, unsafe { nil })
 	assert result == 'workspace file'
 }
 
@@ -195,6 +199,7 @@ fn test_execute_tool_use_record_experience() {
 		os.unsetenv('MINIMAX_CONFIG_HOME')
 		os.rmdir_all(test_dir) or {}
 	}
+	mut bash_session := new_bash_session(test_dir)
 
 	tool := ToolUse{
 		id:    'tu_exp_1'
@@ -209,7 +214,8 @@ fn test_execute_tool_use_record_experience() {
 			'confidence': '5'
 		}
 	}
-	result := execute_tool_use_in_workspace(tool, '', default_config())
+	result := execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(),
+		false, false, unsafe { nil })
 	assert result.contains('已记录经验')
 	assert result.contains('已同步 skill')
 	assert result.contains('已升级 SOP')
@@ -771,6 +777,7 @@ fn test_get_tools_schema_json_includes_list_files() {
 }
 
 fn test_execute_tool_use_list_files_requires_api_key() {
+	mut bash_session := new_bash_session('')
 	tool := ToolUse{
 		id:    'tu_1'
 		name:  'list_files'
@@ -778,7 +785,8 @@ fn test_execute_tool_use_list_files_requires_api_key() {
 			'purpose': 't2a_async_input'
 		}
 	}
-	result := execute_tool_use_in_workspace(tool, '', default_config())
+	result := execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(),
+		false, false, unsafe { nil })
 	assert result.contains('file management requires an API key')
 }
 
@@ -962,14 +970,6 @@ fn test_todo_manager_invalid_action() {
 // ===== activate_skill via execute_tool_use =====
 
 fn test_execute_tool_use_activate_skill() {
-	// Reset skill registry
-	skill_registry.skills = []
-	skill_registry.loaded = false
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	skill_registry.loaded = true
-
 	tool := ToolUse{
 		id:    'tu_1'
 		name:  'activate_skill'
@@ -983,13 +983,6 @@ fn test_execute_tool_use_activate_skill() {
 }
 
 fn test_execute_tool_use_activate_skill_not_found() {
-	skill_registry.skills = []
-	skill_registry.loaded = false
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	skill_registry.loaded = true
-
 	tool := ToolUse{
 		id:    'tu_1'
 		name:  'activate_skill'
@@ -1086,20 +1079,20 @@ fn test_read_many_files_tool_glob() {
 // ===== sequentialthinking_tool =====
 
 fn test_sequentialthinking_tool_basic() {
-	result := sequentialthinking_tool('First step', 1, 3, true, false, 0, 0)
+	result := sequentialthinking_tool('First step', 1, 3, true, false, 0, 0, false)
 	assert result.contains('1/3')
 	assert result.contains('recorded')
 	assert result.contains('continuing')
 }
 
 fn test_sequentialthinking_tool_last_step() {
-	result := sequentialthinking_tool('Final', 3, 3, false, false, 0, 0)
+	result := sequentialthinking_tool('Final', 3, 3, false, false, 0, 0, false)
 	assert result.contains('3/3')
 	assert result.contains('complete')
 }
 
 fn test_sequentialthinking_tool_revision() {
-	result := sequentialthinking_tool('Revised thought', 2, 3, true, true, 1, 0)
+	result := sequentialthinking_tool('Revised thought', 2, 3, true, true, 1, 0, false)
 	assert result.contains('Revision')
 	assert result.contains('recorded')
 }
@@ -1165,32 +1158,21 @@ fn test_get_tools_schema_json_valid() {
 }
 
 fn test_mouse_control_requires_flag() {
-	prev := allow_desktop_control
-	allow_desktop_control = false
-	defer {
-		allow_desktop_control = prev
-	}
-	result := mouse_control_tool('move', 10, 10, 'left', 1, 120)
+	config := default_config()
+	result := mouse_control_tool('move', 10, 10, 'left', 1, 120, config)
 	assert result.contains('未开启')
 }
 
 fn test_keyboard_control_requires_flag() {
-	prev := allow_desktop_control
-	allow_desktop_control = false
-	defer {
-		allow_desktop_control = prev
-	}
-	result := keyboard_control_tool('type', 'hello', '')
+	config := default_config()
+	result := keyboard_control_tool('type', 'hello', '', config)
 	assert result.contains('未开启')
 }
 
 fn test_capture_screen_requires_flag() {
-	prev := allow_screen_capture
-	allow_screen_capture = false
-	defer {
-		allow_screen_capture = prev
-	}
-	result := capture_screen_tool('', 0, 0, 0, 0)
+	mut config := default_config()
+	config.enable_screen_capture = false
+	result := capture_screen_tool('', 0, 0, 0, 0, config)
 	assert result.contains('Error:')
 	assert result.contains('未开启')
 }
@@ -1312,7 +1294,7 @@ fn test_build_doctor_report_formats_checks_and_notes() {
 }
 
 fn test_handle_builtin_command_doctor() {
-	result := handle_builtin_command('doctor')
+	result := handle_builtin_command('doctor', default_config())
 	assert result.contains('桌面能力自检')
 	assert result.contains('当前平台')
 }
@@ -1324,14 +1306,14 @@ fn test_handle_builtin_command_read() {
 		return
 	}
 	defer { os.rm(test_path) or {} }
-	result := handle_builtin_command('#read ${test_path}')
+	result := handle_builtin_command('#read ${test_path}', default_config())
 	assert result == 'builtin read content'
 }
 
 fn test_handle_builtin_command_write() {
 	test_path := '/tmp/__minimax_builtin_write__.txt'
 	defer { os.rm(test_path) or {} }
-	result := handle_builtin_command('#write ${test_path} hello builtin world')
+	result := handle_builtin_command('#write ${test_path} hello builtin world', default_config())
 	assert result.contains('文件已写入')
 	content := os.read_file(test_path) or {
 		assert false
@@ -1345,18 +1327,18 @@ fn test_handle_builtin_command_ls() {
 	os.mkdir(test_dir) or {}
 	os.write_file(os.join_path(test_dir, 'file1.txt'), '') or {}
 	defer { os.rmdir_all(test_dir) or {} }
-	result := handle_builtin_command('#ls ${test_dir}')
+	result := handle_builtin_command('#ls ${test_dir}', default_config())
 	assert result.contains('file1.txt')
 	assert result.contains('[FILE]')
 }
 
 fn test_handle_builtin_command_run() {
-	result := handle_builtin_command('#run echo builtin-run-ok')
+	result := handle_builtin_command('#run echo builtin-run-ok', default_config())
 	assert result.contains('builtin-run-ok')
 }
 
 fn test_handle_builtin_command_write_usage() {
-	result := handle_builtin_command('#write only_path')
+	result := handle_builtin_command('#write only_path', default_config())
 	assert result == '用法: #write <path> <content>'
 }
 
@@ -1368,18 +1350,18 @@ fn test_doctor_command_usage_lists_test_commands() {
 }
 
 fn test_handle_doctor_command_help() {
-	result := handle_doctor_command('doctor help')
+	result := handle_doctor_command('doctor help', default_config())
 	assert result.contains('用法:')
 	assert result.contains('doctor test keyboard type <text>')
 }
 
 fn test_handle_doctor_command_invalid_mouse_args() {
-	result := handle_doctor_command('doctor test mouse move 10')
+	result := handle_doctor_command('doctor test mouse move 10', default_config())
 	assert result == '用法: doctor test mouse move <x> <y>'
 }
 
 fn test_handle_doctor_command_invalid_keyboard_args() {
-	result := handle_doctor_command('doctor test keyboard send ')
+	result := handle_doctor_command('doctor test keyboard send ', default_config())
 	assert result.contains('用法: doctor test keyboard send <keys>')
 }
 

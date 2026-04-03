@@ -95,12 +95,11 @@ fn handle_interactive_exact_command(mut client ApiClient, trimmed string) Intera
 			return .continue_loop
 		}
 		'skills' {
-			print_skills_list()
+			print_skills_list(client.workspace, client.current_skill)
 			return .continue_loop
 		}
 		'skills reload' {
-			reload_skill_registry(client.workspace)
-			println('✅ 技能已重新加载 (共 ${get_all_skills().len} 个)')
+			println('✅ 技能已重新加载 (共 ${get_all_skills(client.workspace).len} 个)')
 			return .continue_loop
 		}
 		'experience', 'experiences' {
@@ -243,24 +242,24 @@ fn handle_interactive_exact_command(mut client ApiClient, trimmed string) Intera
 			return .continue_loop
 		}
 		'checkpoint' {
-			ensure_checkpoint_manager(client.workspace)
+			mut checkpoint_mgr := ensure_checkpoint_manager(client.workspace)
 			result := checkpoint_mgr.create_checkpoint('')
 			println(result)
 			return .continue_loop
 		}
 		'checkpoints' {
-			ensure_checkpoint_manager(client.workspace)
+			checkpoint_mgr := ensure_checkpoint_manager(client.workspace)
 			println(checkpoint_mgr.list_checkpoints())
 			return .continue_loop
 		}
 		'restore' {
-			ensure_checkpoint_manager(client.workspace)
+			mut checkpoint_mgr := ensure_checkpoint_manager(client.workspace)
 			result := checkpoint_mgr.restore_checkpoint(0)
 			println(result)
 			return .continue_loop
 		}
 		'todos' {
-			println(todo_list_items())
+			println(todo_list_items(load_todo_items()))
 			return .continue_loop
 		}
 		'todos clear' {
@@ -275,14 +274,14 @@ fn handle_interactive_exact_command(mut client ApiClient, trimmed string) Intera
 
 fn handle_interactive_prefixed_command(mut client ApiClient, trimmed string) InteractiveLoopAction {
 	if trimmed.starts_with('checkpoint ') {
-		ensure_checkpoint_manager(client.workspace)
+		mut checkpoint_mgr := ensure_checkpoint_manager(client.workspace)
 		lbl := trimmed['checkpoint '.len..].trim_space()
 		result := checkpoint_mgr.create_checkpoint(lbl)
 		println(result)
 		return .continue_loop
 	}
 	if trimmed.starts_with('restore ') {
-		ensure_checkpoint_manager(client.workspace)
+		mut checkpoint_mgr := ensure_checkpoint_manager(client.workspace)
 		id_str := trimmed['restore '.len..].trim_space()
 		result := checkpoint_mgr.restore_checkpoint(id_str.int())
 		println(result)
@@ -290,14 +289,14 @@ fn handle_interactive_prefixed_command(mut client ApiClient, trimmed string) Int
 	}
 	if trimmed.starts_with('skill ') {
 		sname := trimmed['skill '.len..].trim_space()
-		if skill := find_skill(sname) {
+		if skill := find_skill(client.workspace, sname) {
 			client.system_prompt = skill.prompt
 			client.enable_tools = true
-			skill_registry.active_skill = skill.name
+			client.current_skill = skill.name
 			println('\x1b[35m🎯 已切换技能: ${skill.name} — ${skill.description} [${skill.source}]\x1b[0m')
 		} else {
 			println('⚠️  未知技能: ${sname}')
-			print_skills_list()
+			print_skills_list(client.workspace, client.current_skill)
 		}
 		return .continue_loop
 	}
@@ -421,7 +420,7 @@ fn handle_interactive_general_input(mut client ApiClient, trimmed string) {
 		shell_cmd := trimmed[1..].trim_space()
 		if shell_cmd.len > 0 {
 			println('\x1b[2m\$ ${shell_cmd}\x1b[0m')
-			shell_result := bash_session.execute(shell_cmd)
+			shell_result := client.bash_session.execute(shell_cmd)
 			println(shell_result)
 		}
 	} else {

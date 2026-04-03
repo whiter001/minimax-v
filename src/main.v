@@ -5,18 +5,6 @@ import readline
 
 const version = 'v0.9.0'
 
-fn sigint_handler(_ os.Signal) {
-	// Prevent re-entrant signal handling which causes segfault
-	if runtime_mark_shutting_down() {
-		exit(130)
-	}
-	runtime_stop_all_mcp()
-	if !runtime_is_acp_mode() {
-		println('\n👋 已中断')
-	}
-	exit(130)
-}
-
 // confirm_refined_prompt displays a refined prompt and asks the user for confirmation
 fn confirm_refined_prompt(refined string) bool {
 	println('\x1b[1;33m✨ 优化后的提示词:\x1b[0m\n${refined}\n')
@@ -117,13 +105,24 @@ fn main() {
 	init_command_registry(client.workspace)
 
 	// Register signal handler for graceful shutdown
-	os.signal_opt(.int, sigint_handler) or {}
+	os.signal_opt(.int, fn [mut client] (_ os.Signal) {
+		// Prevent re-entrant signal handling which causes segfault
+		if client.runtime_mark_shutting_down() {
+			exit(130)
+		}
+		client.runtime_stop_all_mcp()
+		if !client.runtime_is_acp_mode() {
+			println('\n👋 已中断')
+		}
+		exit(130)
+	}) or {}
 	cli_state := parse_cli_args(mut client, args, prompt, is_interactive)
 	prompt = cli_state.prompt
 	is_interactive = cli_state.is_interactive
 	current_skill := cli_state.current_skill
 	output_format := cli_state.output_format
 	runtime_flags := cli_state.runtime_flags
+	client.current_skill = current_skill
 	if cli_state.should_print_quota {
 		print_quota(client)
 		return
@@ -135,10 +134,10 @@ fn main() {
 		is_interactive = runtime_flags.is_interactive
 	}
 	show_skills := runtime_flags.show_skills
+	client.acp_mode = acp_mode
 
 	if acp_mode {
-		runtime_set_acp_mode(true)
-		set_tool_capabilities(client.enable_desktop_control, client.enable_screen_capture)
+		client.runtime_set_acp_mode(true)
 		run_acp_server(client) or {
 			eprintln('ACP server error: ${err}')
 			exit(1)
@@ -154,16 +153,12 @@ fn main() {
 		init_mcp_external(mut client)
 	}
 
-	set_tool_capabilities(client.enable_desktop_control, client.enable_screen_capture)
-	bash_session = new_bash_session(client.workspace)
-
 	// Re-init skill registry with final workspace (--workspace may override)
-	reload_skill_registry(client.workspace)
 	reload_command_registry(client.workspace)
 
 	// Handle deferred --skills flag (after workspace is set)
 	if show_skills {
-		print_skills_list()
+		print_skills_list(client.workspace, client.current_skill)
 		return
 	}
 
@@ -187,7 +182,7 @@ fn main() {
 	client.logger.log_session_end()
 
 	// Cleanup MCP (always safe to call, even if only builtin was registered)
-	runtime_stop_all_mcp()
+	client.runtime_stop_all_mcp()
 
 	if exit_code != 0 {
 		exit(exit_code)
@@ -302,9 +297,7 @@ fn print_quota(client ApiClient) {
 fn init_mcp_builtin(mut client ApiClient) {
 	if client.mcp_manager.servers.len == 0 {
 		client.mcp_manager = new_mcp_manager()
-		runtime_set_mcp_manager(&client.mcp_manager)
 	} else {
-		runtime_set_mcp_manager(&client.mcp_manager)
 	}
 	if manager_has_server_named(client.mcp_manager, 'MiniMax') {
 		client.enable_tools = true

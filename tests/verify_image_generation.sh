@@ -168,7 +168,7 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 echo ""
 # Offline coverage only checks local behavior and does not require a real API key.
 echo "[1/3] 离线验收"
-v -enable-globals test src/tools_test.v
+v test src/tools_test.v
 check_contains "缺少 API Key 有明确提示" "$(MINIMAX_API_KEY='' "$REPO_ROOT/minimax_cli" -p 'test' 2>&1 || true)" "未配置 API Key"
 
 echo ""

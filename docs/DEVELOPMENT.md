@@ -13,15 +13,15 @@
 等价核心命令：
 
 ```bash
-v -enable-globals -o minimax_cli src/
+v -o minimax_cli src/
 ```
 
-必须带 -enable-globals，因为项目显式使用了多个 \_\_global 变量。
+当前实现不再需要额外的全局变量开关。
 
 ### 生产构建
 
 ```bash
-v -enable-globals -prod .
+v -prod .
 ```
 
 ## 运行
@@ -98,13 +98,13 @@ v fmt -w src/xxx.v
 ### 单元测试
 
 ```bash
-v -enable-globals test src/
+v test src/
 ```
 
 ### 运行单文件测试
 
 ```bash
-v -enable-globals test src/config_test.v
+v test src/config_test.v
 ```
 
 ### 集成测试
@@ -128,7 +128,7 @@ v -enable-globals test src/config_test.v
 当前约定：
 
 - pre-commit：执行 tests/check_vfmt.sh
-- pre-push：执行 build.sh 和 v -enable-globals test src/
+- pre-push：执行 build.sh 和 v test src/
 
 ## 变更原则
 
@@ -141,7 +141,7 @@ v -enable-globals test src/config_test.v
 
 ### 构建失败并提示 globals
 
-检查是否漏掉 -enable-globals。
+检查是否漏掉新的编译或测试错误。
 
 ### 技能未发现
 

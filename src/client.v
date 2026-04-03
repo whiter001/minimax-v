@@ -158,7 +158,7 @@ fn resolve_tool_command_path(command_name string) string {
 	return os.find_abs_path_of_executable(command_name) or { '' }
 }
 
-fn build_bash_tool_diagnostic(command string) string {
+fn build_bash_tool_diagnostic(command string, session BashSession) string {
 	normalized := normalize_tool_command(command)
 	command_head := extract_tool_command_head(command)
 	use_direct := should_use_windows_direct_command(command)
@@ -181,8 +181,8 @@ fn build_bash_tool_diagnostic(command string) string {
 		'public'], 8)
 	mut parts := [
 		'shell=${shell_kind}',
-		'cwd=${bash_session.cwd}',
-		'session_env=${bash_session.env.len}',
+		'cwd=${session.cwd}',
+		'session_env=${session.env.len}',
 	]
 	if shell_path.len > 0 {
 		parts << 'shell_path=${shell_path}'
@@ -285,9 +285,15 @@ pub mut:
 	enable_screen_capture   bool
 	debug                   bool
 	workspace               string
+	bash_session            BashSession
+	term_ui_enabled         bool
+	term_ui_app             &TermUiApp
 	logger                  Logger
 	mcp_manager             McpManager
 	trajectory              TrajectoryRecorder
+	shutting_down           bool
+	acp_mode                bool
+	current_skill           string
 	phase_status_generation u64
 	phase_status_signature  string
 	plan_mode               bool // Plan mode: draft plan first, execute after user approval
@@ -317,8 +323,14 @@ fn new_api_client(config Config) ApiClient {
 		enable_screen_capture:   config.enable_screen_capture
 		debug:                   config.debug
 		workspace:               config.workspace
+		bash_session:            new_bash_session(config.workspace)
+		term_ui_enabled:         false
+		term_ui_app:             unsafe { nil }
 		logger:                  new_logger(config.enable_logging)
 		trajectory:              new_trajectory_recorder(false)
+		shutting_down:           false
+		acp_mode:                false
+		current_skill:           ''
 		phase_status_generation: 0
 		phase_status_signature:  ''
 		silent_mode:             false
@@ -350,6 +362,8 @@ pub fn (mut c ApiClient) refine_prompt(prompt string) !string {
 		system_prompt:          refine_system_prompt
 		logger:                 c.logger
 		silent_mode:            true
+		term_ui_enabled:        false
+		term_ui_app:            unsafe { nil }
 		enable_desktop_control: false
 		enable_screen_capture:  false
 		enable_tools:           false
@@ -442,7 +456,7 @@ fn (mut c ApiClient) build_request_json_internal(messages []ChatMessage) string 
 
 	// Inject skills metadata so AI can discover and activate skills
 	if c.enable_tools {
-		skills_meta := build_skills_metadata()
+		skills_meta := build_skills_metadata(c.workspace)
 		append_system_prompt_part(mut system_parts, skills_meta)
 		sops_meta := build_sops_metadata()
 		append_system_prompt_part(mut system_parts, sops_meta)
@@ -820,15 +834,15 @@ fn phase_status_spinner_frame(elapsed_seconds int) string {
 	return frames[elapsed_seconds % frames.len]
 }
 
-fn render_phase_status_line(message string, detail string, elapsed_seconds int) {
+fn render_phase_status_line(c &ApiClient, message string, detail string, elapsed_seconds int) {
 	spinner := phase_status_spinner_frame(elapsed_seconds)
-	if term_ui_is_active() {
+	if c.term_ui_is_active() {
 		mut status := '${spinner} ${message}'
 		if detail.len > 0 {
 			status += ': ${trim_status_detail(detail, 100)}'
 		}
 		status += ' (${elapsed_seconds}s)'
-		term_ui_set_status(status)
+		c.term_ui_set_status(status)
 		return
 	}
 	mut line := '\x1b[2m${spinner} ${message}'
@@ -847,22 +861,22 @@ fn phase_status_timer_loop(c &ApiClient, generation u64, message string, detail 
 			return
 		}
 		elapsed_seconds++
-		render_phase_status_line(message, detail, elapsed_seconds)
+		render_phase_status_line(c, message, detail, elapsed_seconds)
 	}
 }
 
 fn (mut c ApiClient) clear_phase_status_line() {
 	stdatomic.add_u64(&c.phase_status_generation, 1)
 	c.phase_status_signature = ''
-	if term_ui_is_active() {
-		term_ui_clear_status()
+	if c.term_ui_is_active() {
+		c.term_ui_clear_status()
 		return
 	}
 	print('\r\x1b[2K')
 }
 
 fn (c ApiClient) should_show_phase_status() bool {
-	return c.interactive_mode && !c.silent_mode && !runtime_is_acp_mode()
+	return c.interactive_mode && !c.silent_mode && !c.acp_mode
 }
 
 fn (mut c ApiClient) print_phase_status(message string, detail string) {
@@ -875,7 +889,7 @@ fn (mut c ApiClient) print_phase_status(message string, detail string) {
 	}
 	c.phase_status_signature = signature
 	generation := stdatomic.add_u64(&c.phase_status_generation, 1)
-	render_phase_status_line(message, detail, 0)
+	render_phase_status_line(c, message, detail, 0)
 	go phase_status_timer_loop(c, generation, message, detail)
 }
 
@@ -956,8 +970,8 @@ fn (c ApiClient) parse_text_response(response_body string) string {
 
 fn (mut c ApiClient) log_parsed_thinking_if_needed(parsed ParsedResponse) {
 	if !c.use_streaming && parsed.thinking.len > 0 {
-		if term_ui_is_active() {
-			term_ui_append_thinking(parsed.thinking)
+		if c.term_ui_is_active() {
+			c.term_ui_append_thinking(parsed.thinking)
 		} else if !c.silent_mode {
 			c.clear_phase_status_line()
 			println('\x1b[92m🧠 Thinking: ${parsed.thinking}\x1b[0m')
@@ -1033,7 +1047,7 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 		if tu.name == 'bash' {
 			c.logger.log_tool_diagnostic(tu.name, build_bash_tool_diagnostic(tu.input['command'] or {
 				''
-			}))
+			}, c.bash_session))
 		}
 		tool_start_ms := time.now().unix_milli()
 		tool_detail := summarize_tool_timing_detail(tu)
@@ -1046,8 +1060,8 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 			raw_result = 'Error: 检测到相同的 bash 失败命令已连续重复，已阻止再次执行。请先修改命令、检查路径或权限，或改用其他工具。'
 			c.logger.log('WARN', 'TOOL_GUARD', 'blocked repeated failed bash command')
 		} else {
-			raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, tu, c.workspace,
-				c.config)
+			raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, mut c.bash_session,
+				tu, c.workspace, c.config, c.acp_mode, c.term_ui_enabled, c.term_ui_app)
 		}
 		c.logger.log_phase_end('tool.execute', time.now().unix_milli() - tool_start_ms,
 			'step=${step.step_number} round=${tool_round} name=${tu.name} ${tool_detail}')
@@ -1117,8 +1131,8 @@ fn (mut c ApiClient) complete_task_done(mut step AgentStep, mut execution AgentE
 
 	// Self-Correction: if there were multiple retries but final success, automate experience recording
 	if total_retries >= 2 && c.enable_tools {
-		skill_name := if skill_registry.active_skill.len > 0 {
-			skill_registry.active_skill
+		skill_name := if c.current_skill.len > 0 {
+			c.current_skill
 		} else {
 			'general'
 		}
@@ -1135,8 +1149,8 @@ fn (mut c ApiClient) complete_task_done(mut step AgentStep, mut execution AgentE
 		}
 	}
 
-	if term_ui_is_active() {
-		term_ui_add_activity('Agent 完成任务')
+	if c.term_ui_is_active() {
+		c.term_ui_add_activity('Agent 完成任务')
 	} else if !c.silent_mode {
 		println('\x1b[32m✅ Agent 完成任务\x1b[0m')
 	}
@@ -1299,8 +1313,8 @@ fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bo
 								text := json_str[start..end]
 								unescaped := text.replace('\\n', '\n').replace('\\t',
 									'\t').replace('\\"', '"')
-								if term_ui_is_active() {
-									term_ui_append_thinking(unescaped)
+								if c.term_ui_is_active() {
+									c.term_ui_append_thinking(unescaped)
 								} else if state.show_output {
 									if !state.output_started {
 										c.clear_phase_status_line()
@@ -1328,8 +1342,8 @@ fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bo
 								text := json_str[start..end]
 								unescaped := text.replace('\\n', '\n').replace('\\t',
 									'\t').replace('\\"', '"')
-								if term_ui_is_active() {
-									term_ui_append_stream_text(unescaped)
+								if c.term_ui_is_active() {
+									c.term_ui_append_stream_text(unescaped)
 								} else if state.show_output {
 									if !state.output_started {
 										c.clear_phase_status_line()
@@ -1383,8 +1397,8 @@ fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bo
 			print('\x1b[0m\n')
 		}
 	}
-	if term_ui_is_active() && state.full_text.len == 0 && final_text.len > 0 {
-		term_ui_append_stream_text(final_text)
+	if c.term_ui_is_active() && state.full_text.len == 0 && final_text.len > 0 {
+		c.term_ui_append_stream_text(final_text)
 	} else if state.show_output && state.full_text.len == 0 && final_text.len > 0 {
 		if !state.output_started {
 			c.clear_phase_status_line()
@@ -1392,7 +1406,7 @@ fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bo
 		}
 		print(final_text)
 	}
-	if state.show_output && !term_ui_is_active() {
+	if state.show_output && !c.term_ui_is_active() {
 		println('')
 	}
 	c.logger.log_phase_end('api.stream', time.now().unix_milli() - start_ms, 'bytes=${body_json.len} text_len=${final_text.len} thinking_len=${final_thinking.len}')
@@ -1708,9 +1722,10 @@ fn (mut c ApiClient) chat(prompt string) !string {
 				if consecutive_tool_failure_rounds == 2 {
 					c.add_message('user', 'SYSTEM: 连续两轮工具执行失败。请先探测环境状态并避免重复同样参数。')
 				} else if consecutive_tool_failure_rounds >= tool_failure_escalation_round {
-					if c.interactive_mode && !runtime_is_acp_mode() {
+					if c.interactive_mode && !c.acp_mode {
 						question := '连续${consecutive_tool_failure_rounds}轮工具失败。请告诉我你希望我下一步怎么做（例如改目标/给路径/允许先总结）。'
-						user_guidance := ask_user_tool(question)
+						user_guidance := ask_user_tool(question, c.acp_mode, c.term_ui_enabled,
+							c.term_ui_app)
 						if user_guidance.len > 0 && !user_guidance.starts_with('Error:')
 							&& user_guidance != '(User provided no answer)' {
 							c.add_message('user', 'User guidance (failure escalation): ${user_guidance}')
@@ -1750,8 +1765,9 @@ fn (mut c ApiClient) chat(prompt string) !string {
 				content:      ''
 				content_json: err_json
 			}
-			if c.interactive_mode && !runtime_is_acp_mode() && !max_rounds_asked_user {
-				user_guidance := ask_user_tool('已达到最大工具调用轮数。请明确下一步优先级，或允许我直接总结当前结果。')
+			if c.interactive_mode && !c.acp_mode && !max_rounds_asked_user {
+				user_guidance := ask_user_tool('已达到最大工具调用轮数。请明确下一步优先级，或允许我直接总结当前结果。',
+					c.acp_mode, c.term_ui_enabled, c.term_ui_app)
 				max_rounds_asked_user = true
 				if user_guidance.len > 0 && !user_guidance.starts_with('Error:')
 					&& user_guidance != '(User provided no answer)' {

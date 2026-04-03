@@ -69,7 +69,7 @@ echo "========================================="
 # 1. 编译
 echo ""
 echo "🔨 编译..."
-if v -enable-globals -o minimax_cli src/ 2>&1; then
+if v -o minimax_cli src/ 2>&1; then
 	pass "编译成功"
 else
 	fail "编译" "编译失败"

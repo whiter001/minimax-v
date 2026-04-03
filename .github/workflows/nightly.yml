@@ -31,7 +31,7 @@ jobs:
 
       - name: Run unit tests
         shell: bash
-        run: v -enable-globals test src/
+        run: v test src/
 
       - name: Run offline integration tests
         shell: bash
@@ -69,7 +69,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path bin | Out-Null
           $binaryPath = "bin/${env:BINARY_NAME}${{ matrix.bin_ext }}"
-          v -enable-globals -o $binaryPath src/
+          v -o $binaryPath src/
 
       - name: Package artifact
         shell: pwsh
@@ -140,9 +140,9 @@ jobs:
             echo '### Verification performed'
             echo
             echo '- V formatting check (`tests/check_vfmt.sh`)'
-            echo '- Full unit test suite (`v -enable-globals test src/`)'
+            echo '- Full unit test suite (`v test src/`)'
             echo '- Offline integration tests (`tests/integration_test.sh`)'
-            echo '- Multi-platform binary build with `-enable-globals`'
+            echo '- Multi-platform binary build with `v -o <binary> src/`'
             echo
             echo '### Notes'
             echo

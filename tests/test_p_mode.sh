@@ -122,7 +122,7 @@ fi
 echo -e "\n\033[1m[4/5] Cron 调度器单元测试 (v test)...\033[0m"
 
 if command -v v &>/dev/null; then
-    cron_out=$(v -enable-globals test src/cron_test.v 2>&1)
+    cron_out=$(v test src/cron_test.v 2>&1)
     cron_exit=$?
     if [[ $cron_exit -eq 0 ]]; then
         passed=$(echo "$cron_out" | grep -oE '[0-9]+ passed' | head -1)

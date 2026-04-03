@@ -185,15 +185,15 @@ fn apply_cli_value_flag(mut client ApiClient, arg string, args []string, current
 		}
 		'--skill' {
 			if value := take_cli_value(args) {
-				if skill := find_skill(value) {
+				if skill := find_skill(client.workspace, value) {
 					client.auto_skills = false
 					client.system_prompt = skill.prompt
 					client.enable_tools = true
 					result.current_skill = skill.name
-					skill_registry.active_skill = skill.name
+					client.current_skill = skill.name
 				} else {
 					println('⚠️  未知技能: ${value}')
-					print_skills_list()
+					print_skills_list(client.workspace, client.current_skill)
 					exit(1)
 				}
 				return finish_cli_value_result(mut result)

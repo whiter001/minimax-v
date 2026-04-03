@@ -476,8 +476,8 @@ fn test_summarize_path_entries_prefers_focus_terms() {
 }
 
 fn test_build_bash_tool_diagnostic_includes_command_context() {
-	bash_session = new_bash_session('')
-	diag := build_bash_tool_diagnostic('bun -v')
+	mut client := new_api_client(default_config())
+	diag := build_bash_tool_diagnostic('bun -v', client.bash_session)
 	assert diag.contains('command_head=bun')
 	assert diag.contains('cwd=')
 	assert diag.contains('bun_path=')
@@ -502,14 +502,6 @@ fn test_build_tool_error_results_json_marks_errors() {
 // ===== build_request_json: skills metadata injection =====
 
 fn test_build_request_json_skills_metadata_injected() {
-	// Setup skill registry
-	skill_registry.skills = []
-	skill_registry.loaded = false
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	skill_registry.loaded = true
-
 	mut config := default_config()
 	config.api_key = 'test-key'
 	config.enable_tools = true
@@ -523,13 +515,6 @@ fn test_build_request_json_skills_metadata_injected() {
 }
 
 fn test_build_request_json_no_skills_without_tools() {
-	skill_registry.skills = []
-	skill_registry.loaded = false
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	skill_registry.loaded = true
-
 	mut config := default_config()
 	config.api_key = 'test-key'
 	config.enable_tools = false
@@ -616,17 +601,18 @@ fn test_build_request_json_auto_check_sops_adds_metadata_and_instruction() {
 }
 
 fn test_build_request_json_includes_working_checkpoint() {
-	prev_cp := working_checkpoint
-	prev_loaded := working_checkpoint_loaded
-	working_checkpoint = WorkingCheckpoint{
+	tmp_root := os.join_path(os.temp_dir(), 'minimax-checkpoint-test')
+	os.mkdir_all(tmp_root) or { panic(err) }
+	os.setenv('MINIMAX_CONFIG_HOME', tmp_root, true)
+	defer {
+		os.unsetenv('MINIMAX_CONFIG_HOME')
+		os.rmdir_all(tmp_root) or {}
+	}
+	checkpoint_path := get_working_checkpoint_path()
+	os.write_file(checkpoint_path, serialize_working_checkpoint(WorkingCheckpoint{
 		key_info:    'Remember constraints'
 		related_sop: 'memory/plan_sop.md'
-	}
-	working_checkpoint_loaded = true
-	defer {
-		working_checkpoint = prev_cp
-		working_checkpoint_loaded = prev_loaded
-	}
+	})) or { panic(err) }
 	mut config := default_config()
 	config.api_key = 'test-key'
 	config.enable_tools = true

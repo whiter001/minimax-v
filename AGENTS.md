@@ -24,7 +24,7 @@
 
 ## 硬性约束
 
-- 构建、测试、运行一律使用 -enable-globals。
+- 构建、测试、运行直接使用 `v` 即可。
 - 修改 .v 文件后立刻执行 `v fmt -w` 对应文件。
 - 修改 .md 文件后立刻执行 `oxfmt --write` 对应文件。
 - 不引入外部运行时依赖来替代现有标准库实现，除非任务明确要求。
@@ -37,8 +37,8 @@
 
 ```bash
 ./build.sh
-v -enable-globals -o minimax_cli src/
-v -enable-globals -prod .
+v -o minimax_cli src/
+v -prod .
 ```
 
 ### 运行
@@ -54,8 +54,8 @@ v -enable-globals -prod .
 ### 测试
 
 ```bash
-v -enable-globals test src/
-v -enable-globals test src/config_test.v
+v test src/
+v test src/config_test.v
 ./tests/check_vfmt.sh
 ./integration_test.sh
 ./comprehensive_test.sh

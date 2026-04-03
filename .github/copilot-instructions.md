@@ -8,8 +8,7 @@
 
 ```bash
 ./build.sh
-# 运行: v -enable-globals -o minimax_cli src/
-# 必须使用 -enable-globals 标志，因为代码使用了 __global 全局变量（如 g_mcp_manager, g_shutting_down, bash_session）
+# 运行: v -o minimax_cli src/
 ```
 
 ### 测试和验证
@@ -28,7 +27,7 @@
 ./comprehensive_test.sh
 
 # 运行特定测试文件
-v -enable-globals test src/config_test.v
+v test src/config_test.v
 ```
 
 ## 高层架构
@@ -71,7 +70,7 @@ v -enable-globals test src/config_test.v
    - JSON-RPC 2.0 客户端（stdio 上）用于 MCP 服务器
    - 管理 MCP 服务器生命周期（启动/停止）
    - 从 MCP 服务器发现工具（如 web_search, understand_image）
-   - 全局 McpManager 用于集中管理服务器
+   - McpManager 用于集中管理服务器
 
 7. **高级特性**
    - **会话 (`sessions.v`)**：多会话对话持久化和恢复
@@ -92,14 +91,9 @@ v -enable-globals test src/config_test.v
 
 ### 全局状态管理
 
-```v
-__global g_mcp_manager = &McpManager(unsafe { nil })
-__global bash_session = BashSession{}
-```
-
-- 全局变量使用 `__global` 关键字
-- 必须用 `-enable-globals` 标志编译
-- 用于无法轻易传递的跨函数状态（如信号处理器、持久会话）
+- 状态通过 `ApiClient`、局部 manager 和显式参数传递来持有，不依赖全局变量开关。
+- 直接使用 `v` 编译即可
+- 需要跨函数共享的状态时，优先使用对象字段或函数参数，而不是进程级全局变量。
 
 ### Windows 兼容性
 

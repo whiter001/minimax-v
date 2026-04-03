@@ -2,12 +2,16 @@ module main
 
 import os
 
-// Helper: reset skill registry for isolated test state
-fn reset_registry() {
-	skill_registry.skills = []
-	skill_registry.active_skill = ''
-	skill_registry.loaded = false
+// Helper: create a local skill registry for isolated test state
+fn new_test_skill_registry() SkillRegistry {
+	return SkillRegistry{
+		skills:       []Skill{}
+		active_skill: ''
+		loaded:       true
+	}
 }
+
+fn reset_registry() {}
 
 // ===== parse_skill_md =====
 
@@ -148,6 +152,7 @@ fn test_parse_skill_md_nonexistent_file() {
 
 fn test_add_or_override_skill_same_priority() {
 	reset_registry()
+	mut registry := new_test_skill_registry()
 	s1 := Skill{
 		name:        'test'
 		description: 'v1'
@@ -160,14 +165,15 @@ fn test_add_or_override_skill_same_priority() {
 		prompt:      'p2'
 		source:      'builtin'
 	}
-	skill_registry.skills << s1
-	add_or_override_skill(s2)
-	assert skill_registry.skills.len == 1
-	assert skill_registry.skills[0].description == 'v2' // same priority overrides
+	registry.skills << s1
+	add_or_override_skill(mut registry, s2)
+	assert registry.skills.len == 1
+	assert registry.skills[0].description == 'v2' // same priority overrides
 }
 
 fn test_add_or_override_skill_higher_priority_overrides() {
 	reset_registry()
+	mut registry := new_test_skill_registry()
 	s1 := Skill{
 		name:        'test'
 		description: 'builtin'
@@ -180,15 +186,16 @@ fn test_add_or_override_skill_higher_priority_overrides() {
 		prompt:      'p2'
 		source:      'user'
 	}
-	skill_registry.skills << s1
-	add_or_override_skill(s2)
-	assert skill_registry.skills.len == 1
-	assert skill_registry.skills[0].source == 'user'
-	assert skill_registry.skills[0].description == 'user'
+	registry.skills << s1
+	add_or_override_skill(mut registry, s2)
+	assert registry.skills.len == 1
+	assert registry.skills[0].source == 'user'
+	assert registry.skills[0].description == 'user'
 }
 
 fn test_add_or_override_skill_lower_priority_no_override() {
 	reset_registry()
+	mut registry := new_test_skill_registry()
 	s1 := Skill{
 		name:        'test'
 		description: 'project'
@@ -201,14 +208,15 @@ fn test_add_or_override_skill_lower_priority_no_override() {
 		prompt:      'p2'
 		source:      'builtin'
 	}
-	skill_registry.skills << s1
-	add_or_override_skill(s2)
-	assert skill_registry.skills.len == 1
-	assert skill_registry.skills[0].source == 'project' // not overridden
+	registry.skills << s1
+	add_or_override_skill(mut registry, s2)
+	assert registry.skills.len == 1
+	assert registry.skills[0].source == 'project' // not overridden
 }
 
 fn test_add_or_override_skill_new_name_appends() {
 	reset_registry()
+	mut registry := new_test_skill_registry()
 	s1 := Skill{
 		name:        'a'
 		description: 'd1'
@@ -221,13 +229,14 @@ fn test_add_or_override_skill_new_name_appends() {
 		prompt:      'p2'
 		source:      'user'
 	}
-	skill_registry.skills << s1
-	add_or_override_skill(s2)
-	assert skill_registry.skills.len == 2
+	registry.skills << s1
+	add_or_override_skill(mut registry, s2)
+	assert registry.skills.len == 2
 }
 
 fn test_add_or_override_three_tier() {
 	reset_registry()
+	mut registry := new_test_skill_registry()
 	builtin := Skill{
 		name:        'coder'
 		description: 'builtin'
@@ -246,24 +255,18 @@ fn test_add_or_override_three_tier() {
 		prompt:      'pp'
 		source:      'project'
 	}
-	skill_registry.skills << builtin
-	add_or_override_skill(user)
-	assert skill_registry.skills[0].source == 'user'
-	add_or_override_skill(project)
-	assert skill_registry.skills[0].source == 'project'
-	assert skill_registry.skills[0].prompt == 'pp'
+	registry.skills << builtin
+	add_or_override_skill(mut registry, user)
+	assert registry.skills[0].source == 'user'
+	add_or_override_skill(mut registry, project)
+	assert registry.skills[0].source == 'project'
+	assert registry.skills[0].prompt == 'pp'
 }
 
 // ===== find_skill =====
 
 fn test_find_skill_builtin() {
-	reset_registry()
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	skill_registry.loaded = true
-
-	if skill := find_skill('coder') {
+	if skill := find_skill('', 'coder') {
 		assert skill.name == 'coder'
 		assert skill.source == 'builtin'
 	} else {
@@ -272,9 +275,7 @@ fn test_find_skill_builtin() {
 }
 
 fn test_find_skill_not_found() {
-	reset_registry()
-	skill_registry.loaded = true
-	if _ := find_skill('nonexistent-skill') {
+	if _ := find_skill('', 'nonexistent-skill') {
 		assert false, 'should return none'
 	}
 }
@@ -294,39 +295,21 @@ fn test_get_builtin_skills_count() {
 }
 
 fn test_get_all_skills_after_init() {
-	reset_registry()
-	skill_registry.loaded = true
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	all := get_all_skills()
+	all := get_all_skills('')
 	assert all.len >= 15
 }
 
 // ===== activate_skill_tool =====
 
 fn test_activate_skill_tool_success() {
-	reset_registry()
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	skill_registry.loaded = true
-
-	result := activate_skill_tool('debugger')
+	result := activate_skill_tool('', 'debugger')
 	assert result.contains('Skill activated')
 	assert result.contains('debugger')
 	assert result.contains('Skill Instructions')
-	assert skill_registry.active_skill == 'debugger'
 }
 
 fn test_activate_skill_tool_not_found() {
-	reset_registry()
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	skill_registry.loaded = true
-
-	result := activate_skill_tool('nonexistent')
+	result := activate_skill_tool('', 'nonexistent')
 	assert result.contains('not found')
 	assert result.contains('Available skills')
 	assert result.contains('coder')
@@ -335,22 +318,14 @@ fn test_activate_skill_tool_not_found() {
 // ===== build_skills_metadata =====
 
 fn test_build_skills_metadata_with_skills() {
-	reset_registry()
-	skill_registry.skills << Skill{
-		name:        'test1'
-		description: 'desc1'
-		prompt:      'p'
-		source:      'builtin'
-	}
-	skill_registry.skills << Skill{
-		name:        'test2'
-		description: 'desc2'
-		prompt:      'p'
-		source:      'user'
-	}
-	skill_registry.loaded = true
-
-	meta := build_skills_metadata()
+	workspace := os.join_path(os.temp_dir(), '__minimax_skill_meta__')
+	os.rmdir_all(workspace) or {}
+	os.mkdir_all(os.join_path(workspace, '.agents', 'skills', 'test1')) or {}
+	os.mkdir_all(os.join_path(workspace, '.agents', 'skills', 'test2')) or {}
+	defer { os.rmdir_all(workspace) or {} }
+	os.write_file(os.join_path(workspace, '.agents', 'skills', 'test1', 'SKILL.md'), '---\nname: test1\ndescription: desc1\n---\n\np') or {}
+	os.write_file(os.join_path(workspace, '.agents', 'skills', 'test2', 'SKILL.md'), '---\nname: test2\ndescription: desc2\n---\n\np') or {}
+	meta := build_skills_metadata(workspace)
 	assert meta.contains('Available Skills')
 	assert meta.contains('activate_skill')
 	assert meta.contains('test1: desc1')
@@ -358,11 +333,13 @@ fn test_build_skills_metadata_with_skills() {
 }
 
 fn test_build_skills_metadata_empty() {
-	reset_registry()
-	skill_registry.loaded = true
-
-	meta := build_skills_metadata()
-	assert meta == ''
+	workspace := os.join_path(os.temp_dir(), '__minimax_skill_meta_empty__')
+	os.rmdir_all(workspace) or {}
+	os.mkdir_all(workspace) or {}
+	defer { os.rmdir_all(workspace) or {} }
+	meta := build_skills_metadata(workspace)
+	assert meta.contains('Available Skills')
+	assert meta.contains('coder')
 }
 
 // ===== create_skill_template =====
@@ -401,6 +378,7 @@ fn test_create_skill_template_already_exists() {
 
 fn test_load_custom_skills_from_dir_subdir_structure() {
 	reset_registry()
+	mut registry := new_test_skill_registry()
 	base_dir := '/tmp/__minimax_skill_discovery__'
 	os.rmdir_all(base_dir) or {}
 	os.mkdir_all(os.join_path(base_dir, 'alpha')) or {}
@@ -410,27 +388,27 @@ fn test_load_custom_skills_from_dir_subdir_structure() {
 	os.write_file(os.join_path(base_dir, 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: Alpha skill\n---\n\nAlpha prompt.') or {}
 	os.write_file(os.join_path(base_dir, 'beta', 'SKILL.md'), '---\nname: beta\ndescription: Beta skill\n---\n\nBeta prompt.') or {}
 
-	skill_registry.loaded = true
-	load_custom_skills_from_dir(base_dir, 'project')
+	load_custom_skills_from_dir(base_dir, 'project', mut registry)
 
-	assert skill_registry.skills.len == 2
-	names := skill_registry.skills.map(it.name)
+	assert registry.skills.len == 2
+	names := registry.skills.map(it.name)
 	assert 'alpha' in names
 	assert 'beta' in names
-	for s in skill_registry.skills {
+	for s in registry.skills {
 		assert s.source == 'project'
 	}
 }
 
 fn test_load_custom_skills_from_dir_nonexistent() {
 	reset_registry()
-	skill_registry.loaded = true
-	load_custom_skills_from_dir('/tmp/__no_such_dir_minimax__', 'user')
-	assert skill_registry.skills.len == 0 // no crash, just skip
+	mut registry := new_test_skill_registry()
+	load_custom_skills_from_dir('/tmp/__no_such_dir_minimax__', 'user', mut registry)
+	assert registry.skills.len == 0 // no crash, just skip
 }
 
 fn test_load_custom_skills_from_dir_root_skill_md() {
 	reset_registry()
+	mut registry := new_test_skill_registry()
 	base_dir := '/tmp/__minimax_root_skill__'
 	os.rmdir_all(base_dir) or {}
 	os.mkdir_all(base_dir) or {}
@@ -439,26 +417,17 @@ fn test_load_custom_skills_from_dir_root_skill_md() {
 	// SKILL.md directly in the skills dir (not in a subdirectory)
 	os.write_file(os.join_path(base_dir, 'SKILL.md'), '---\nname: root-skill\ndescription: In root\n---\n\nRoot prompt.') or {}
 
-	skill_registry.loaded = true
-	load_custom_skills_from_dir(base_dir, 'user')
-	assert skill_registry.skills.len == 1
-	assert skill_registry.skills[0].name == 'root-skill'
+	load_custom_skills_from_dir(base_dir, 'user', mut registry)
+	assert registry.skills.len == 1
+	assert registry.skills[0].name == 'root-skill'
 }
 
 // ===== reload_skill_registry =====
 
 fn test_reload_skill_registry() {
-	reset_registry()
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	skill_registry.loaded = true
-	old_count := skill_registry.skills.len
-
-	// Reload should clear and re-populate
-	reload_skill_registry('')
-	assert skill_registry.loaded == true
-	assert skill_registry.skills.len >= 15 // at least builtins
+	registry := reload_skill_registry('')
+	assert registry.loaded == true
+	assert registry.skills.len >= 15 // at least builtins
 }
 
 // ===== Integration: full tier discovery =====
@@ -475,11 +444,8 @@ fn test_full_tier_discovery() {
 	// Project skill that overrides builtin 'coder'
 	os.write_file(os.join_path(skills_dir, 'SKILL.md'), '---\nname: coder\ndescription: Project coder\n---\n\nProject-level coder prompt.') or {}
 
-	// Init with workspace
-	init_skill_registry(project_dir)
-
 	// The 'coder' should be project-level, not builtin
-	if skill := find_skill('coder') {
+	if skill := find_skill(project_dir, 'coder') {
 		assert skill.source == 'project'
 		assert skill.description == 'Project coder'
 		assert skill.prompt == 'Project-level coder prompt.'
@@ -488,7 +454,7 @@ fn test_full_tier_discovery() {
 	}
 
 	// Other builtins should still be present
-	if skill := find_skill('debugger') {
+	if skill := find_skill(project_dir, 'debugger') {
 		assert skill.source == 'builtin'
 	} else {
 		assert false, 'should find builtin debugger'
@@ -499,10 +465,6 @@ fn test_full_tier_discovery() {
 
 fn test_print_skills_list_no_crash() {
 	reset_registry()
-	for s in get_builtin_skills() {
-		skill_registry.skills << s
-	}
-	skill_registry.loaded = true
 	// Just verify no panic
-	print_skills_list()
+	print_skills_list('', '')
 }

@@ -15,7 +15,6 @@ struct Skill {
 	path        string // file path for custom skills (empty for builtin)
 }
 
-// Global skill registry
 struct SkillRegistry {
 mut:
 	skills       []Skill
@@ -23,40 +22,41 @@ mut:
 	loaded       bool
 }
 
-__global skill_registry = SkillRegistry{}
-
 // Initialize skill registry: discover all skills from all tiers
-fn init_skill_registry(workspace string) {
-	if skill_registry.loaded {
-		return
+fn load_skill_registry(workspace string) SkillRegistry {
+	mut registry := SkillRegistry{
+		skills:       []Skill{}
+		active_skill: ''
+		loaded:       true
 	}
-	skill_registry.skills = []
 	// 1. Built-in skills (lowest priority)
 	for s in get_builtin_skills() {
-		skill_registry.skills << s
+		registry.skills << s
 	}
 	// 2. User-level skills (~/.config/minimax/skills/)
 	user_dir := os.join_path(get_minimax_config_dir(), 'skills')
-	load_custom_skills_from_dir(user_dir, 'user')
+	load_custom_skills_from_dir(user_dir, 'user', mut registry)
 	// Also check ~/.agents/skills/ alias
 	user_agents_dir := expand_home_path('~/.agents/skills')
-	load_custom_skills_from_dir(user_agents_dir, 'user')
+	load_custom_skills_from_dir(user_agents_dir, 'user', mut registry)
 	// 3. Project-level skills (highest priority)
 	if workspace.len > 0 {
 		project_dir := os.join_path(workspace, '.agents', 'skills')
-		load_custom_skills_from_dir(project_dir, 'project')
+		load_custom_skills_from_dir(project_dir, 'project', mut registry)
 	}
-	skill_registry.loaded = true
+	return registry
 }
 
-fn reload_skill_registry(workspace string) {
-	skill_registry.loaded = false
-	skill_registry.skills = []
-	init_skill_registry(workspace)
+fn init_skill_registry(workspace string) SkillRegistry {
+	return load_skill_registry(workspace)
+}
+
+fn reload_skill_registry(workspace string) SkillRegistry {
+	return load_skill_registry(workspace)
 }
 
 // Load custom SKILL.md files from a directory
-fn load_custom_skills_from_dir(dir string, source string) {
+fn load_custom_skills_from_dir(dir string, source string, mut registry SkillRegistry) {
 	if !os.is_dir(dir) {
 		return
 	}
@@ -64,7 +64,7 @@ fn load_custom_skills_from_dir(dir string, source string) {
 	skill_file := os.join_path(dir, 'SKILL.md')
 	if os.is_file(skill_file) {
 		if skill := parse_skill_md(skill_file, source) {
-			add_or_override_skill(skill)
+			add_or_override_skill(mut registry, skill)
 		}
 	}
 	// Scan subdirectories for SKILL.md
@@ -75,7 +75,7 @@ fn load_custom_skills_from_dir(dir string, source string) {
 			sub_skill_file := os.join_path(subdir, 'SKILL.md')
 			if os.is_file(sub_skill_file) {
 				if skill := parse_skill_md(sub_skill_file, source) {
-					add_or_override_skill(skill)
+					add_or_override_skill(mut registry, skill)
 				}
 			}
 		}
@@ -83,7 +83,7 @@ fn load_custom_skills_from_dir(dir string, source string) {
 }
 
 // Add skill to registry, overriding same-name skill from lower tier
-fn add_or_override_skill(new_skill Skill) {
+fn add_or_override_skill(mut registry SkillRegistry, new_skill Skill) {
 	// Priority: project > user > builtin
 	priority := fn (source string) int {
 		return match source {
@@ -92,15 +92,15 @@ fn add_or_override_skill(new_skill Skill) {
 			else { 1 }
 		}
 	}
-	for i, existing in skill_registry.skills {
+	for i, existing in registry.skills {
 		if existing.name == new_skill.name {
 			if priority(new_skill.source) >= priority(existing.source) {
-				skill_registry.skills[i] = new_skill
+				registry.skills[i] = new_skill
 			}
 			return
 		}
 	}
-	skill_registry.skills << new_skill
+	registry.skills << new_skill
 }
 
 // Parse a SKILL.md file with YAML frontmatter
@@ -159,9 +159,9 @@ fn parse_skill_md(path string, source string) ?Skill {
 }
 
 // Find a skill by name from the registry
-fn find_skill(name string) ?Skill {
-	init_skill_registry('')
-	for skill in skill_registry.skills {
+fn find_skill(workspace string, name string) ?Skill {
+	registry := load_skill_registry(workspace)
+	for skill in registry.skills {
 		if skill.name == name {
 			return skill
 		}
@@ -170,17 +170,16 @@ fn find_skill(name string) ?Skill {
 }
 
 // Get all skills (for listing)
-fn get_all_skills() []Skill {
-	init_skill_registry('')
-	return skill_registry.skills
+fn get_all_skills(workspace string) []Skill {
+	registry := load_skill_registry(workspace)
+	return registry.skills
 }
 
 // Activate a skill: load its full prompt into the system
-fn activate_skill_tool(name string) string {
-	init_skill_registry('')
-	for skill in skill_registry.skills {
+fn activate_skill_tool(workspace string, name string) string {
+	registry := load_skill_registry(workspace)
+	for skill in registry.skills {
 		if skill.name == name {
-			skill_registry.active_skill = name
 			mut info := '✅ Skill activated: "${skill.name}" — ${skill.description}\n'
 			info += 'Source: ${skill.source}'
 			if skill.path.len > 0 {
@@ -192,7 +191,7 @@ fn activate_skill_tool(name string) string {
 	}
 	// List available
 	mut available := 'Error: Skill "${name}" not found.\nAvailable skills:\n'
-	for skill in skill_registry.skills {
+	for skill in registry.skills {
 		available += '  - ${skill.name}: ${skill.description} [${skill.source}]\n'
 	}
 	return available
@@ -200,14 +199,14 @@ fn activate_skill_tool(name string) string {
 
 // Build skills metadata string for system prompt injection
 // Only injects name + description (not full prompt) to save tokens
-fn build_skills_metadata() string {
-	init_skill_registry('')
-	if skill_registry.skills.len == 0 {
+fn build_skills_metadata(workspace string) string {
+	registry := load_skill_registry(workspace)
+	if registry.skills.len == 0 {
 		return ''
 	}
 	mut parts := []string{}
 	parts << 'Available Skills (use activate_skill tool to load specialized expertise):'
-	for skill in skill_registry.skills {
+	for skill in registry.skills {
 		parts << '  - ${skill.name}: ${skill.description}'
 	}
 	return parts.join('\n')
@@ -227,9 +226,9 @@ fn create_skill_template(name string, dir string) string {
 }
 
 // Print enhanced skills list with source info
-fn print_skills_list() {
-	init_skill_registry('')
-	skills := skill_registry.skills
+fn print_skills_list(workspace string, active_skill string) {
+	registry := load_skill_registry(workspace)
+	skills := registry.skills
 	println('🎯 可用技能 (Skills):')
 	println('')
 	// Group by source
@@ -247,7 +246,7 @@ fn print_skills_list() {
 		println('  \x1b[1m📂 项目技能 (.agents/skills/):\x1b[0m')
 		for skill in skills {
 			if skill.source == 'project' {
-				active := if skill_registry.active_skill == skill.name {
+				active := if active_skill == skill.name {
 					' \x1b[32m◀ 已激活\x1b[0m'
 				} else {
 					''
@@ -261,7 +260,7 @@ fn print_skills_list() {
 		println('  \x1b[1m👤 用户技能 (~/.config/minimax/skills/):\x1b[0m')
 		for skill in skills {
 			if skill.source == 'user' {
-				active := if skill_registry.active_skill == skill.name {
+				active := if active_skill == skill.name {
 					' \x1b[32m◀ 已激活\x1b[0m'
 				} else {
 					''
@@ -275,7 +274,7 @@ fn print_skills_list() {
 		println('  \x1b[1m⚙️  内置技能:\x1b[0m')
 		for skill in skills {
 			if skill.source == 'builtin' {
-				active := if skill_registry.active_skill == skill.name {
+				active := if active_skill == skill.name {
 					' \x1b[32m◀ 已激活\x1b[0m'
 				} else {
 					''

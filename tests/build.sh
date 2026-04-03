@@ -36,7 +36,7 @@ fi
 
 # Build from src/
 echo "📦 Compiling from src/..."
-"$v_bin" -enable-globals -o minimax_cli src/
+"$v_bin" -o minimax_cli src/
 
 echo "✅ Build complete!"
 echo "📍 Binary: ./minimax_cli"

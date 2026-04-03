@@ -34,4 +34,4 @@ echo "[pre-push] Building project..."
 bash ./build.sh
 
 echo "[pre-push] Running unit tests..."
-"$v_bin" -enable-globals test src/
+"$v_bin" test src/

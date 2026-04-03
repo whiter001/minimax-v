@@ -2,6 +2,7 @@ module main
 
 import encoding.base64
 import encoding.hex
+import json
 import net.http
 import net.smtp
 import os
@@ -25,19 +26,10 @@ const speech_synthesis_supported_models = ['speech-2.8-hd', 'speech-2.8-turbo', 
 	'speech-2.6-turbo', 'speech-02-hd', 'speech-02-turbo', 'speech-01-hd', 'speech-01-turbo']
 const speech_synthesis_supported_output_formats = ['url', 'hex']
 
-__global bash_session = BashSession{}
-__global allow_desktop_control = false
-__global allow_screen_capture = false
-
 pub struct ToolDefinition {
 pub mut:
 	name        string
 	description string
-}
-
-fn set_tool_capabilities(enable_desktop_control bool, enable_screen_capture bool) {
-	allow_desktop_control = enable_desktop_control
-	allow_screen_capture = enable_screen_capture
 }
 
 // --- Windows Reserved Name Check ---
@@ -1953,7 +1945,7 @@ fn handle_builtin_command_with_client(mut client ApiClient, input string) string
 	if is_speech_synthesis_command(input) {
 		return run_speech_synthesis_command(mut client, input)
 	}
-	return handle_builtin_command(input)
+	return handle_builtin_command(input, client.config)
 }
 
 fn is_integer_string(value string) bool {
@@ -1996,15 +1988,23 @@ fn macos_screen_recording_doctor_check() DoctorCheck {
 	return DoctorCheck{'屏幕录制权限', 'ok', '截图命令可用'}
 }
 
-fn desktop_doctor_report() string {
+fn desktop_doctor_report(config Config) string {
 	mut checks := []DoctorCheck{}
 	checks << DoctorCheck{'当前平台', if os.user_os() == 'macos' { 'ok' } else { 'info' }, os.user_os()}
-	checks << DoctorCheck{'enable_desktop_control', if allow_desktop_control { 'ok' } else { 'warn' }, if allow_desktop_control {
+	checks << DoctorCheck{'enable_desktop_control', if config.enable_desktop_control {
+		'ok'
+	} else {
+		'warn'
+	}, if config.enable_desktop_control {
 		'已开启'
 	} else {
 		'未开启'
 	}}
-	checks << DoctorCheck{'enable_screen_capture', if allow_screen_capture { 'ok' } else { 'warn' }, if allow_screen_capture {
+	checks << DoctorCheck{'enable_screen_capture', if config.enable_screen_capture {
+		'ok'
+	} else {
+		'warn'
+	}, if config.enable_screen_capture {
 		'已开启'
 	} else {
 		'未开启'
@@ -2065,10 +2065,10 @@ fn doctor_command_usage() string {
 	].join('\n')
 }
 
-fn handle_doctor_command(input string) string {
+fn handle_doctor_command(input string, config Config) string {
 	trimmed := input.trim_space()
 	if trimmed == 'doctor' || trimmed == 'doctor desktop' {
-		return desktop_doctor_report()
+		return desktop_doctor_report(config)
 	}
 	if trimmed == 'doctor help' {
 		return doctor_command_usage()
@@ -2078,21 +2078,22 @@ fn handle_doctor_command(input string) string {
 		if trimmed.len > 'doctor test screen'.len {
 			output_path = trimmed['doctor test screen'.len..].trim_space()
 		}
-		return capture_screen_tool(output_path, 0, 0, 0, 0)
+		return capture_screen_tool(output_path, 0, 0, 0, 0, config)
 	}
 	if trimmed.starts_with('doctor test mouse move ') {
 		args := trimmed['doctor test mouse move '.len..].split(' ').filter(it.trim_space().len > 0)
 		if args.len != 2 {
 			return '用法: doctor test mouse move <x> <y>'
 		}
-		return mouse_control_tool('move', args[0].int(), args[1].int(), 'left', 1, 120)
+		return mouse_control_tool('move', args[0].int(), args[1].int(), 'left', 1, 120,
+			config)
 	}
 	if trimmed.starts_with('doctor test mouse scroll ') {
 		args := trimmed['doctor test mouse scroll '.len..].split(' ').filter(it.trim_space().len > 0)
 		if args.len != 1 {
 			return '用法: doctor test mouse scroll <delta>'
 		}
-		return mouse_control_tool('scroll', 0, 0, 'left', 1, args[0].int())
+		return mouse_control_tool('scroll', 0, 0, 'left', 1, args[0].int(), config)
 	}
 	if trimmed == 'doctor test keyboard type' || trimmed.starts_with('doctor test keyboard type ') {
 		text := if trimmed.len > 'doctor test keyboard type'.len {
@@ -2103,7 +2104,7 @@ fn handle_doctor_command(input string) string {
 		if text.len == 0 {
 			return '用法: doctor test keyboard type <text>'
 		}
-		return keyboard_control_tool('type', text, '')
+		return keyboard_control_tool('type', text, '', config)
 	}
 	if trimmed == 'doctor test keyboard send' || trimmed.starts_with('doctor test keyboard send ') {
 		keys := if trimmed.len > 'doctor test keyboard send'.len {
@@ -2114,7 +2115,7 @@ fn handle_doctor_command(input string) string {
 		if keys.len == 0 {
 			return '用法: doctor test keyboard send <keys>'
 		}
-		return keyboard_control_tool('send', '', keys)
+		return keyboard_control_tool('send', '', keys, config)
 	}
 	if trimmed.starts_with('doctor test ') {
 		return doctor_command_usage()
@@ -2558,9 +2559,6 @@ mut:
 	related_sop string
 }
 
-__global working_checkpoint = WorkingCheckpoint{}
-__global working_checkpoint_loaded = false
-
 fn get_working_checkpoint_path() string {
 	config_dir := get_minimax_config_dir()
 	if !os.is_dir(config_dir) {
@@ -2588,22 +2586,18 @@ fn serialize_working_checkpoint(cp WorkingCheckpoint) string {
 	return '[KEY_INFO]\n${cp.key_info.trim_space()}\n\n[RELATED_SOP]\n${cp.related_sop.trim_space()}\n'
 }
 
-fn load_working_checkpoint_once() {
-	if working_checkpoint_loaded {
-		return
-	}
-	working_checkpoint_loaded = true
+fn load_working_checkpoint() WorkingCheckpoint {
 	path := get_working_checkpoint_path()
 	if !os.exists(path) {
-		return
+		return WorkingCheckpoint{}
 	}
-	content := os.read_file(path) or { return }
-	working_checkpoint = parse_working_checkpoint(content)
+	content := os.read_file(path) or { return WorkingCheckpoint{} }
+	return parse_working_checkpoint(content)
 }
 
-fn save_working_checkpoint() ! {
+fn save_working_checkpoint(cp WorkingCheckpoint) ! {
 	path := get_working_checkpoint_path()
-	os.write_file(path, serialize_working_checkpoint(working_checkpoint))!
+	os.write_file(path, serialize_working_checkpoint(cp))!
 }
 
 fn format_working_checkpoint(cp WorkingCheckpoint) string {
@@ -2618,8 +2612,8 @@ fn format_working_checkpoint(cp WorkingCheckpoint) string {
 }
 
 fn get_working_checkpoint_context() string {
-	load_working_checkpoint_once()
-	formatted := format_working_checkpoint(working_checkpoint)
+	cp := load_working_checkpoint()
+	formatted := format_working_checkpoint(cp)
 	if formatted.len == 0 {
 		return ''
 	}
@@ -2627,24 +2621,26 @@ fn get_working_checkpoint_context() string {
 }
 
 fn update_working_checkpoint_tool(key_info string, related_sop string) string {
-	load_working_checkpoint_once()
+	mut cp := load_working_checkpoint()
 	trimmed_key := key_info.trim_space()
 	trimmed_sop := related_sop.trim_space()
 	if trimmed_key.len == 0 && trimmed_sop.len == 0 {
-		current := format_working_checkpoint(working_checkpoint)
+		current := format_working_checkpoint(cp)
 		if current.len == 0 {
 			return '(No working checkpoint yet)'
 		}
 		return current
 	}
 	if trimmed_key.len > 0 {
-		working_checkpoint.key_info = trimmed_key
+		cp.key_info = trimmed_key
 	}
 	if trimmed_sop.len > 0 {
-		working_checkpoint.related_sop = trimmed_sop
+		cp.related_sop = trimmed_sop
 	}
-	save_working_checkpoint() or { return 'Error: Failed to save working checkpoint: ${err.msg()}' }
-	current := format_working_checkpoint(working_checkpoint)
+	save_working_checkpoint(cp) or {
+		return 'Error: Failed to save working checkpoint: ${err.msg()}'
+	}
+	current := format_working_checkpoint(cp)
 	return '✅ Working checkpoint updated\n${current}'
 }
 
@@ -2667,18 +2663,62 @@ struct Checkpoint {
 	files     []string // tracked files (for non-git mode)
 }
 
+fn sanitize_checkpoint_workspace_key(workspace string) string {
+	mut key := workspace.trim_space()
+	if key.len == 0 {
+		return 'default'
+	}
+	key = key.replace('\\', '_').replace('/', '_').replace(':', '_').replace(' ', '_').replace('.',
+		'_')
+	if key.len > 120 {
+		key = key[..120]
+	}
+	return key
+}
+
+fn checkpoint_store_dir(workspace string) string {
+	return os.join_path(get_minimax_config_dir(), 'checkpoints', sanitize_checkpoint_workspace_key(workspace))
+}
+
+fn checkpoint_store_path(workspace string) string {
+	return os.join_path(checkpoint_store_dir(workspace), 'checkpoints.json')
+}
+
 fn new_checkpoint_manager(workspace string) CheckpointManager {
-	is_git := os.exists(os.join_path(workspace, '.git'))
-	backup_dir := os.join_path(get_minimax_config_dir(), 'checkpoints')
+	effective_ws := if workspace.trim_space().len > 0 { workspace } else { os.getwd() }
+	is_git := os.exists(os.join_path(effective_ws, '.git'))
+	backup_dir := checkpoint_store_dir(effective_ws)
 	if !os.is_dir(backup_dir) {
 		os.mkdir_all(backup_dir) or {}
 	}
 	return CheckpointManager{
-		workspace:   workspace
+		workspace:   effective_ws
 		is_git:      is_git
 		checkpoints: []
 		backup_dir:  backup_dir
 	}
+}
+
+fn load_checkpoint_manager(workspace string) CheckpointManager {
+	mut cm := new_checkpoint_manager(workspace)
+	path := checkpoint_store_path(cm.workspace)
+	if !os.exists(path) {
+		return cm
+	}
+	content := os.read_file(path) or { return cm }
+	if content.trim_space().len == 0 {
+		return cm
+	}
+	cm.checkpoints = json.decode([]Checkpoint, content) or { []Checkpoint{} }
+	return cm
+}
+
+fn save_checkpoint_manager(cm CheckpointManager) ! {
+	backup_dir := checkpoint_store_dir(cm.workspace)
+	if !os.is_dir(backup_dir) {
+		os.mkdir_all(backup_dir)!
+	}
+	os.write_file(checkpoint_store_path(cm.workspace), json.encode(cm.checkpoints))!
 }
 
 fn (mut cm CheckpointManager) create_checkpoint(label string) string {
@@ -2701,6 +2741,9 @@ fn (mut cm CheckpointManager) create_checkpoint(label string) string {
 				is_git:    true
 				files:     []
 			}
+			save_checkpoint_manager(cm) or {
+				return 'Error: Failed to persist checkpoint state: ${err.msg()}'
+			}
 			return '📌 Checkpoint #${cp_id} "${cp_label}" (no changes to save)'
 		}
 		// Pop the stash back so working dir stays unchanged, but record it
@@ -2720,6 +2763,9 @@ fn (mut cm CheckpointManager) create_checkpoint(label string) string {
 			timestamp: now
 			is_git:    true
 			files:     [stash_ref]
+		}
+		save_checkpoint_manager(cm) or {
+			return 'Error: Failed to persist checkpoint state: ${err.msg()}'
 		}
 		return '📌 Checkpoint #${cp_id} "${cp_label}" created (git stash) at ${now}'
 	} else {
@@ -2748,6 +2794,9 @@ fn (mut cm CheckpointManager) create_checkpoint(label string) string {
 			timestamp: now
 			is_git:    false
 			files:     backed_up
+		}
+		save_checkpoint_manager(cm) or {
+			return 'Error: Failed to persist checkpoint state: ${err.msg()}'
 		}
 		return '📌 Checkpoint #${cp_id} "${cp_label}" created (${backed_up.len} files backed up) at ${now}'
 	}
@@ -2823,20 +2872,13 @@ fn (cm CheckpointManager) list_checkpoints() string {
 	return result
 }
 
-__global checkpoint_mgr = CheckpointManager{}
-__global checkpoint_mgr_initialized = false
-
-fn ensure_checkpoint_manager(workspace string) {
-	if !checkpoint_mgr_initialized {
-		effective_ws := if workspace.len > 0 { workspace } else { os.getwd() }
-		checkpoint_mgr = new_checkpoint_manager(effective_ws)
-		checkpoint_mgr_initialized = true
-	}
+fn ensure_checkpoint_manager(workspace string) CheckpointManager {
+	return load_checkpoint_manager(workspace)
 }
 
 // Auto-checkpoint: call before file-modifying operations
 fn auto_checkpoint_before_modify(filepath string, workspace string) {
-	ensure_checkpoint_manager(workspace)
+	mut checkpoint_mgr := ensure_checkpoint_manager(workspace)
 	// Only auto-checkpoint in git repos (lightweight)
 	if checkpoint_mgr.is_git && checkpoint_mgr.checkpoints.len == 0 {
 		// Create initial checkpoint on first file modification
@@ -2859,11 +2901,6 @@ struct TodoManager {
 mut:
 	items []TodoItem
 }
-
-// Shared task state is loaded lazily because TODO tools are optional.
-__global todo_mgr = TodoManager{}
-// Prevents repeated disk reads once the task list has been hydrated.
-__global todo_mgr_loaded = false
 
 // Returns the on-disk location used to persist TODO items across sessions.
 fn get_todo_store_path() string {
@@ -2889,9 +2926,9 @@ fn normalize_todo_status(status string) string {
 }
 
 // Allocates the next monotonically increasing TODO id.
-fn next_todo_id() int {
+fn next_todo_id(items []TodoItem) int {
 	mut max_id := 0
-	for item in todo_mgr.items {
+	for item in items {
 		if item.id > max_id {
 			max_id = item.id
 		}
@@ -2899,19 +2936,15 @@ fn next_todo_id() int {
 	return max_id + 1
 }
 
-// Loads persisted TODO items once and ignores malformed records instead of failing.
-fn todo_manager_load_once() {
-	if todo_mgr_loaded {
-		return
-	}
-	todo_mgr_loaded = true
+// Loads persisted TODO items and ignores malformed records instead of failing.
+fn load_todo_items() []TodoItem {
 	path := get_todo_store_path()
 	if !os.exists(path) {
-		return
+		return []TodoItem{}
 	}
-	content := os.read_file(path) or { return }
+	content := os.read_file(path) or { return []TodoItem{} }
 	if content.trim_space().len == 0 {
-		return
+		return []TodoItem{}
 	}
 	mut loaded := []TodoItem{}
 	for line in content.split('\n') {
@@ -2940,14 +2973,14 @@ fn todo_manager_load_once() {
 	}
 	// Keep the task list stable even if the backing file was edited manually.
 	loaded.sort(a.id < b.id)
-	todo_mgr.items = loaded
+	return loaded
 }
 
 // Writes the current TODO list back to disk using the same compact text format.
-fn save_todo_manager_state() ! {
+fn save_todo_manager_state(items []TodoItem) ! {
 	path := get_todo_store_path()
 	mut lines := []string{}
-	for item in todo_mgr.items {
+	for item in items {
 		title := sanitize_todo_title(item.title)
 		if title.len == 0 {
 			continue
@@ -2959,24 +2992,24 @@ fn save_todo_manager_state() ! {
 }
 
 // Converts persistence failures into user-visible tool output.
-fn persist_todo_manager_state() string {
-	save_todo_manager_state() or { return 'Error: Failed to persist TODO list: ${err.msg()}' }
+fn persist_todo_manager_state(items []TodoItem) string {
+	save_todo_manager_state(items) or { return 'Error: Failed to persist TODO list: ${err.msg()}' }
 	return ''
 }
 
 // Central dispatcher for TODO list operations used by the tool layer.
 fn todo_manager_tool(action string, items_json string, id int, title string, status string) string {
-	todo_manager_load_once()
+	mut items := load_todo_items()
 	match action {
 		'list' {
-			return todo_list_items()
+			return todo_list_items(items)
 		}
 		'set' {
 			// Set the entire todo list from JSON-like format
 			// Parse items from the title field: "1. item one\n2. item two"
 			if title.len > 0 {
-				result := todo_set_from_text(title)
-				persist_err := persist_todo_manager_state()
+				result := todo_set_from_text(mut items, title)
+				persist_err := persist_todo_manager_state(items)
 				if persist_err.len > 0 {
 					return persist_err
 				}
@@ -2988,13 +3021,13 @@ fn todo_manager_tool(action string, items_json string, id int, title string, sta
 			if title.len == 0 {
 				return 'Error: title is required'
 			}
-			new_id := next_todo_id()
-			todo_mgr.items << TodoItem{
+			new_id := next_todo_id(items)
+			items << TodoItem{
 				id:     new_id
 				title:  sanitize_todo_title(title)
 				status: 'pending'
 			}
-			persist_err := persist_todo_manager_state()
+			persist_err := persist_todo_manager_state(items)
 			if persist_err.len > 0 {
 				return persist_err
 			}
@@ -3005,14 +3038,14 @@ fn todo_manager_tool(action string, items_json string, id int, title string, sta
 				return 'Error: id is required'
 			}
 			new_status := if status.len > 0 { normalize_todo_status(status) } else { 'done' }
-			for i, item in todo_mgr.items {
+			for i, item in items {
 				if item.id == id {
-					todo_mgr.items[i] = TodoItem{
+					items[i] = TodoItem{
 						id:     item.id
 						title:  if title.len > 0 { sanitize_todo_title(title) } else { item.title }
 						status: new_status
 					}
-					persist_err := persist_todo_manager_state()
+					persist_err := persist_todo_manager_state(items)
 					if persist_err.len > 0 {
 						return persist_err
 					}
@@ -3022,8 +3055,8 @@ fn todo_manager_tool(action string, items_json string, id int, title string, sta
 			return 'Error: TODO #${id} not found'
 		}
 		'clear' {
-			todo_mgr.items = []
-			persist_err := persist_todo_manager_state()
+			items.clear()
+			persist_err := persist_todo_manager_state(items)
 			if persist_err.len > 0 {
 				return persist_err
 			}
@@ -3036,9 +3069,9 @@ fn todo_manager_tool(action string, items_json string, id int, title string, sta
 }
 
 // Parses a newline-delimited TODO payload and replaces the current list.
-fn todo_set_from_text(text string) string {
+fn todo_set_from_text(mut items []TodoItem, text string) string {
 	lines := text.split('\n')
-	todo_mgr.items = []
+	items.clear()
 	mut count := 0
 	for line in lines {
 		trimmed := line.trim_space()
@@ -3057,25 +3090,24 @@ fn todo_set_from_text(text string) string {
 			continue
 		}
 		count++
-		todo_mgr.items << TodoItem{
-			id:     next_todo_id()
+		items << TodoItem{
+			id:     next_todo_id(items)
 			title:  safe_title
 			status: 'pending'
 		}
 	}
-	return '✅ Set ${count} TODO items\n${todo_list_items()}'
+	return '✅ Set ${count} TODO items\n${todo_list_items(items)}'
 }
 
 // Renders the TODO list in a compact, human-friendly format.
-fn todo_list_items() string {
-	todo_manager_load_once()
-	if todo_mgr.items.len == 0 {
+fn todo_list_items(items []TodoItem) string {
+	if items.len == 0 {
 		return '📋 No TODO items. Use action="add" to create tasks.'
 	}
 	mut result := '📋 TODO List:\n'
 	mut done := 0
-	mut total := todo_mgr.items.len
-	for item in todo_mgr.items {
+	mut total := items.len
+	for item in items {
 		icon := match item.status {
 			'done' { '✅' }
 			'in-progress' { '🔄' }
@@ -3311,8 +3343,8 @@ fn run_command_in_dir(cmd string, workdir string) !string {
 	return '✅ 命令执行结果:\n${output}'
 }
 
-fn mouse_control_tool(action string, x int, y int, button string, clicks int, delta int) string {
-	if !allow_desktop_control {
+fn mouse_control_tool(action string, x int, y int, button string, clicks int, delta int, config Config) string {
+	if !config.enable_desktop_control {
 		return 'Error: 桌面控制能力未开启，请设置 enable_desktop_control=true 或使用 --enable-desktop-control'
 	}
 	safe_action := action.trim_space().to_lower()
@@ -3405,8 +3437,8 @@ Write-Output "ok"
 	return '✅ mouse_control: ${safe_action} completed'
 }
 
-fn keyboard_control_tool(action string, text string, keys string) string {
-	if !allow_desktop_control {
+fn keyboard_control_tool(action string, text string, keys string, config Config) string {
+	if !config.enable_desktop_control {
 		return 'Error: 桌面控制能力未开启，请设置 enable_desktop_control=true 或使用 --enable-desktop-control'
 	}
 	safe_action := action.trim_space().to_lower()
@@ -3458,8 +3490,8 @@ Write-Output "ok"
 	return '✅ keyboard_control: ${safe_action} completed'
 }
 
-fn capture_screen_file(path string, x int, y int, width int, height int) !string {
-	if !allow_screen_capture {
+fn capture_screen_file(path string, x int, y int, width int, height int, config Config) !string {
+	if !config.enable_screen_capture {
 		return error('屏幕截图能力未开启，请设置 enable_screen_capture=true 或使用 --enable-screen-capture')
 	}
 	if (width > 0 && height <= 0) || (width <= 0 && height > 0) {
@@ -3565,8 +3597,10 @@ fn maybe_prepare_image_for_understand_image(image_path string) string {
 	return resized_path
 }
 
-fn capture_screen_tool(path string, x int, y int, width int, height int) string {
-	output := capture_screen_file(path, x, y, width, height) or { return 'Error: ${err.msg()}' }
+fn capture_screen_tool(path string, x int, y int, width int, height int, config Config) string {
+	output := capture_screen_file(path, x, y, width, height, config) or {
+		return 'Error: ${err.msg()}'
+	}
 	return '✅ 截图已保存: ${output}'
 }
 
@@ -3702,8 +3736,8 @@ fn call_understand_image_with_fallback(mut mcp McpManager, image_path string, pr
 	return error(last_err)
 }
 
-fn screen_analyze_tool_with_mcp(mut mcp McpManager, input map[string]string, workspace string) string {
-	if !allow_screen_capture {
+fn screen_analyze_tool_with_mcp(mut mcp McpManager, input map[string]string, workspace string, config Config) string {
+	if !config.enable_screen_capture {
 		return 'Error: 屏幕截图能力未开启，请设置 enable_screen_capture=true 或使用 --enable-screen-capture'
 	}
 	normalized_input := normalize_understand_image_input(input)
@@ -3727,7 +3761,9 @@ fn screen_analyze_tool_with_mcp(mut mcp McpManager, input map[string]string, wor
 
 	mut used_capture := false
 	if image_path.trim_space().len == 0 {
-		captured := capture_screen_file('', x, y, width, height) or { return 'Error: ${err.msg()}' }
+		captured := capture_screen_file('', x, y, width, height, config) or {
+			return 'Error: ${err.msg()}'
+		}
 		image_path = captured
 		used_capture = true
 	} else if !os.exists(image_path) {
@@ -3789,9 +3825,9 @@ fn get_available_tools() []ToolDefinition {
 	]
 }
 
-fn handle_builtin_command(input string) string {
+fn handle_builtin_command(input string, config Config) string {
 	if input.starts_with('doctor') {
-		result := handle_doctor_command(input)
+		result := handle_doctor_command(input, config)
 		if result.len > 0 {
 			return result
 		}
@@ -3843,7 +3879,7 @@ fn handle_builtin_command(input string) string {
 
 // --- Sequential Thinking Tool ---
 
-fn sequentialthinking_tool(thought string, thought_number int, total_thoughts int, next_thought_needed bool, is_revision bool, revises_thought int, branch_from int) string {
+fn sequentialthinking_tool(thought string, thought_number int, total_thoughts int, next_thought_needed bool, is_revision bool, revises_thought int, branch_from int, acp_mode bool) string {
 	mut prefix := ''
 	if is_revision && revises_thought > 0 {
 		prefix = '🔄 Revision of thought ${revises_thought}'
@@ -3853,7 +3889,7 @@ fn sequentialthinking_tool(thought string, thought_number int, total_thoughts in
 		prefix = '💭 Thought'
 	}
 	status := if next_thought_needed { 'continuing...' } else { 'complete ✅' }
-	if !runtime_is_acp_mode() {
+	if !acp_mode {
 		println('\x1b[92m  ${prefix} ${thought_number}/${total_thoughts}: ${thought}\x1b[0m')
 		println('\x1b[92m  [${status}]\x1b[0m')
 	}
@@ -4004,15 +4040,17 @@ fn detect_jq_value(val string) string {
 
 // --- ask_user Tool: AI asks user for clarification ---
 
-fn ask_user_tool(question string) string {
+fn ask_user_tool(question string, acp_mode bool, term_ui_enabled bool, term_ui_app &TermUiApp) string {
 	if question.len == 0 {
 		return 'Error: question is required'
 	}
-	if runtime_is_acp_mode() {
+	if acp_mode {
 		return 'Error: ask_user is unavailable in ACP mode'
 	}
-	if term_ui_is_active() {
-		return term_ui_ask_user(question)
+	if term_ui_enabled && term_ui_app != unsafe { nil } {
+		unsafe {
+			return term_ui_app.wait_for_user_answer(question)
+		}
 	}
 	println('\x1b[1;33m\u2753 AI \u63d0\u95ee:\x1b[0m ${question}')
 	print('\x1b[1;34myou >\x1b[0m ')
@@ -4149,10 +4187,12 @@ fn get_tools_schema_json() string {
 }
 
 fn execute_tool_use(tool ToolUse) string {
-	return execute_tool_use_in_workspace(tool, '', default_config())
+	mut bash_session := new_bash_session('')
+	return execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(),
+		false, false, unsafe { nil })
 }
 
-fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) string {
+fn execute_tool_use_in_workspace(mut bash_session BashSession, tool ToolUse, workspace string, config Config, acp_mode bool, term_ui_enabled bool, term_ui_app &TermUiApp) string {
 	match tool.name {
 		'str_replace_editor' {
 			cmd := tool.input['command'] or { '' }
@@ -4228,13 +4268,13 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 			button := tool.input['button'] or { 'left' }
 			clicks := parse_int_input(tool.input, 'clicks', 1)
 			delta := parse_int_input(tool.input, 'delta', 120)
-			return mouse_control_tool(action, x, y, button, clicks, delta)
+			return mouse_control_tool(action, x, y, button, clicks, delta, config)
 		}
 		'keyboard_control' {
 			action := tool.input['action'] or { '' }
 			text := tool.input['text'] or { '' }
 			keys := tool.input['keys'] or { '' }
-			return keyboard_control_tool(action, text, keys)
+			return keyboard_control_tool(action, text, keys, config)
 		}
 		'capture_screen' {
 			path := resolve_workspace_path(tool.input['path'] or { '' }, workspace)
@@ -4242,7 +4282,7 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 			y := parse_int_input(tool.input, 'y', 0)
 			width := parse_int_input(tool.input, 'width', 0)
 			height := parse_int_input(tool.input, 'height', 0)
-			return capture_screen_tool(path, x, y, width, height)
+			return capture_screen_tool(path, x, y, width, height, config)
 		}
 		'screen_analyze' {
 			return 'Error: screen_analyze requires MCP-enabled execution context'
@@ -4286,7 +4326,7 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 			revises := (tool.input['revises_thought'] or { '0' }).int()
 			branch := (tool.input['branch_from_thought'] or { '0' }).int()
 			return sequentialthinking_tool(thought, thought_number, total_thoughts, next_needed,
-				is_revision, revises, branch)
+				is_revision, revises, branch, acp_mode)
 		}
 		'json_edit' {
 			action := tool.input['action'] or { 'view' }
@@ -4297,7 +4337,7 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 		}
 		'ask_user' {
 			question := tool.input['question'] or { '' }
-			return ask_user_tool(question)
+			return ask_user_tool(question, acp_mode, term_ui_enabled, term_ui_app)
 		}
 		'update_working_checkpoint' {
 			key_info := tool.input['key_info'] or { '' }
@@ -4320,7 +4360,7 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 		}
 		'activate_skill' {
 			name := tool.input['name'] or { '' }
-			return activate_skill_tool(name)
+			return activate_skill_tool(workspace, name)
 		}
 		'cron' {
 			action := tool.input['action'] or { '' }
@@ -4351,11 +4391,11 @@ fn execute_tool_use_in_workspace(tool ToolUse, workspace string, config Config) 
 }
 
 fn print_tool_result(mut client ApiClient, name string, result string) {
-	if runtime_is_acp_mode() {
+	if client.acp_mode {
 		return
 	}
-	if term_ui_is_active() {
-		term_ui_add_tool_result(name, result)
+	if client.term_ui_is_active() {
+		client.term_ui_add_tool_result(name, result)
 		return
 	}
 	client.clear_phase_status_line()
@@ -4382,9 +4422,9 @@ fn build_mcp_args_json(input map[string]string) string {
 	return args_json
 }
 
-fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string, config Config) string {
+fn execute_tool_use_with_mcp(mut mcp McpManager, mut bash_session BashSession, tool ToolUse, workspace string, config Config, acp_mode bool, term_ui_enabled bool, term_ui_app &TermUiApp) string {
 	if tool.name == 'screen_analyze' {
-		return screen_analyze_tool_with_mcp(mut mcp, tool.input, workspace)
+		return screen_analyze_tool_with_mcp(mut mcp, tool.input, workspace, config)
 	}
 
 	// Try builtin tools first
@@ -4395,7 +4435,8 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, tool ToolUse, workspace string,
 		'read_many_files', 'activate_skill', 'cron', 'list_files', 'generate_image',
 		'generate_speech', 'send_mail']
 	if tool.name in builtin_names {
-		return execute_tool_use_in_workspace(tool, workspace, config)
+		return execute_tool_use_in_workspace(mut bash_session, tool, workspace, config,
+			acp_mode, term_ui_enabled, term_ui_app)
 	}
 
 	// Try MCP tools
