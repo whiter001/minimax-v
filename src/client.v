@@ -49,7 +49,7 @@ fn (mut c ApiClient) add_message(role string, content string) {
 fn (c ApiClient) build_request_json() string {
 	mut body_json := '{"model":"${c.model}","max_tokens":${c.max_tokens},"temperature":${c.temperature}'
 	if c.enable_tools {
-		body_json += ',"tools":' + get_tools_schema_json()
+		body_json += ',"tools":' + c.executor.get_tools_schema_json()
 	}
 	effective_system := if c.system_prompt.len > 0 {
 		c.system_prompt
@@ -171,5 +171,5 @@ fn (mut c ApiClient) chat(prompt string) !string {
 		}
 		rounds++
 	}
-	return error('达到最大工具调用轮数')
+	return error('达到最大工具调用轮数 (${effective_max})')
 }

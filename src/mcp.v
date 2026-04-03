@@ -121,7 +121,7 @@ fn (mut m McpService) stop_all() {
 	}
 }
 
-fn (mut m McpService) get_all_tools() []McpTool {
+fn (m &McpService) get_all_tools() []McpTool {
 	mut all := builtin_mcp_tools()
 	for server in m.servers {
 		if server.is_connected {

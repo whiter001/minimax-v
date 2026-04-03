@@ -108,6 +108,8 @@ fn run_cli_mode(mut ctx AppContext) {
 	println('Type `!command` to run tools in shell, or :quit to exit.')
 	println('')
 
+	mut prompt_session := new_prompt_session(ctx.config, ctx.executor)
+
 	for {
 		print('> ')
 		input := os.get_line().trim_space()
@@ -127,7 +129,18 @@ fn run_cli_mode(mut ctx AppContext) {
 			println('')
 			continue
 		}
-		println('提示: 用 `!command` 执行命令，例如 `!v-browser open https://x.com`。')
+		if ctx.config.api_key.len == 0 {
+			println('Error: MINIMAX_API_KEY is not set')
+			println('')
+			continue
+		}
+		prompt_session.enqueue(input)
+		result := prompt_session.run() or {
+			println('Error: ${err}')
+			println('')
+			continue
+		}
+		println(result)
 		println('')
 	}
 }
@@ -219,11 +232,12 @@ fn main() {
 			eprintln('Error: MINIMAX_API_KEY is not set')
 			exit(1)
 		}
-		mut api_client := new_api_client(config, ctx.executor)
+		mut prompt_session := new_prompt_session(config, ctx.executor)
+		prompt_session.enqueue(args.prompt)
 		if args.verbose {
-			println('[Main] Running prompt through agent loop...')
+			println('[Main] Running prompt through conversation loop...')
 		}
-		result := api_client.chat(args.prompt) or {
+		result := prompt_session.run() or {
 			eprintln('Prompt error: ${err}')
 			exit(1)
 		}

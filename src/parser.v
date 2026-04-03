@@ -1,5 +1,35 @@
 module main
 
+fn hex_digit_value(ch u8) int {
+	return match ch {
+		`0`...`9` { int(ch - `0`) }
+		`a`...`f` { int(ch - `a`) + 10 }
+		`A`...`F` { int(ch - `A`) + 10 }
+		else { -1 }
+	}
+}
+
+fn parse_json_hex_quad(s string, start int) int {
+	if start < 0 || start + 4 > s.len {
+		return -1
+	}
+	mut value := 0
+	for i := 0; i < 4; i++ {
+		digit := hex_digit_value(s[start + i])
+		if digit < 0 {
+			return -1
+		}
+		value = value * 16 + digit
+	}
+	return value
+}
+
+fn unicode_codepoint_to_string(codepoint int) string {
+	mut chars := []rune{}
+	chars << rune(codepoint)
+	return chars.string()
+}
+
 pub struct ParsedResponse {
 pub mut:
 	text             string
@@ -12,46 +42,63 @@ fn decode_json_string(s string) string {
 	if !s.contains('\\') {
 		return s
 	}
-	mut result := []u8{}
+	mut result := ''
+	mut segment_start := 0
 	mut i := 0
 	for i < s.len {
 		if s[i] == `\\` && i + 1 < s.len {
+			if segment_start < i {
+				result += s[segment_start..i]
+			}
 			match s[i + 1] {
 				`n` {
-					result << `\n`
+					result += '\n'
 					i += 2
 				}
 				`t` {
-					result << `\t`
+					result += '\t'
 					i += 2
 				}
 				`r` {
-					result << `\r`
+					result += '\r'
 					i += 2
 				}
 				`"` {
-					result << `"`
+					result += '"'
 					i += 2
 				}
 				`\\` {
-					result << `\\`
+					result += '\\'
 					i += 2
 				}
 				`/` {
-					result << `/`
+					result += '/'
 					i += 2
 				}
+				`u` {
+					codepoint := parse_json_hex_quad(s, i + 2)
+					if codepoint >= 0 {
+						result += unicode_codepoint_to_string(codepoint)
+						i += 6
+					} else {
+						result += s[i..i + 2]
+						i += 2
+					}
+				}
 				else {
-					result << s[i + 1]
+					result += s[i + 1].ascii_str()
 					i += 2
 				}
 			}
+			segment_start = i
 		} else {
-			result << s[i]
 			i++
 		}
 	}
-	return result.bytestr()
+	if segment_start < s.len {
+		result += s[segment_start..]
+	}
+	return result
 }
 
 fn parse_json_string_object(json_str string) map[string]string {

@@ -48,6 +48,13 @@ pub fn (mut te ToolExecutor) execute_tool(name string, input map[string]string) 
 			return te.execute_skill_tool(input)
 		}
 		else {
+			if !isnil(te.mcp_service) {
+				args_json := build_tool_input_json(input)
+				result := te.mcp_service.call_tool(name, args_json) or {
+					return 'Error: ${err.msg()}'
+				}
+				return result
+			}
 			return 'Error: unknown tool "${name}"'
 		}
 	}
@@ -124,6 +131,28 @@ pub fn get_tools_schema_json() string {
 		'{"name":"mcp","description":"MCP (Model Context Protocol) tool management. Use to list available MCP tools or call a specific MCP tool.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: list or call (default: list)"},"name":{"type":"string","description":"Tool name to call (for action=call)"},"arguments":{"type":"string","description":"JSON arguments for the tool call"}},"required":[]}},' +
 		'{"name":"skill","description":"Skill management. Use to activate a specialized skill or list available skills.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"Skill name to activate (e.g. coder, reviewer, architect)"}},"required":[]}}' +
 		']'
+}
+
+pub fn (te &ToolExecutor) get_tools_schema_json() string {
+	mut schemas := []string{}
+	mut seen := map[string]bool{}
+	schemas << '{"name":"bash","description":"A persistent bash shell session. Working directory and environment variables are preserved between calls.","input_schema":{"type":"object","properties":{"command":{"type":"string","description":"The bash command to execute"},"restart":{"type":"boolean","description":"Set to true to restart the bash session (reset cwd and env)"}},"required":["command"]}}'
+	seen['bash'] = true
+	schemas << '{"name":"mcp","description":"MCP (Model Context Protocol) tool management. Use to list available MCP tools or call a specific MCP tool.","input_schema":{"type":"object","properties":{"action":{"type":"string","description":"Action: list or call (default: list)"},"name":{"type":"string","description":"Tool name to call (for action=call)"},"arguments":{"type":"string","description":"JSON arguments for the tool call"}},"required":[]}}'
+	seen['mcp'] = true
+	schemas << '{"name":"skill","description":"Skill management. Use to activate a specialized skill or list available skills.","input_schema":{"type":"object","properties":{"name":{"type":"string","description":"Skill name to activate (e.g. coder, reviewer, architect)"}},"required":[]}}'
+	seen['skill'] = true
+	if !isnil(te.mcp_service) {
+		for tool in te.mcp_service.get_all_tools() {
+			if seen[tool.name] {
+				continue
+			}
+			schema := if tool.raw_schema.len > 0 { tool.raw_schema } else { '{"type":"object","properties":{},"required":[]}' }
+			schemas << '{"name":"${escape_json_string(tool.name)}","description":"${escape_json_string(tool.description)}","input_schema":${schema}}'
+			seen[tool.name] = true
+		}
+	}
+	return '[' + schemas.join(',') + ']'
 }
 
 pub fn build_tool_input_json(input map[string]string) string {
