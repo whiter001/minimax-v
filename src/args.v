@@ -533,7 +533,7 @@ fn print_help() {
 	println('  ./minimax_cli --log -p "调试这个Bug" --enable-tools')
 	println('')
 	println('\x1b[1mMCP 服务:\x1b[0m')
-	println('  内置: MiniMax MCP (web_search, understand_image)，默认注册，按需启动')
+	println('  外部 MCP 服务需通过 --mcp 加载 ~/.config/minimax/mcp.json')
 	println('  额外配置 (~/.config/minimax/mcp.json):')
 	println('  {"servers":{"playwright":{"type":"stdio","command":"npx","args":["-y","@playwright/mcp@latest"]}}}')
 }

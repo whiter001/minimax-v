@@ -145,9 +145,6 @@ fn main() {
 		return
 	}
 
-	// Always init builtin MCP (lazy - only starts on first tool call)
-	init_mcp_builtin(mut client)
-
 	// Load external MCP servers (mcp.json + extensions) only when --mcp is passed
 	if mcp_enabled {
 		init_mcp_external(mut client)
@@ -293,37 +290,24 @@ fn print_quota(client ApiClient) {
 	println('')
 }
 
-// init_mcp_builtin always registers the built-in MiniMax MCP (lazy start).
-fn init_mcp_builtin(mut client ApiClient) {
-	if client.mcp_manager.servers.len == 0 {
-		client.mcp_manager = new_mcp_manager()
-	} else {
-	}
-	if manager_has_server_named(client.mcp_manager, 'MiniMax') {
-		client.enable_tools = true
-		return
-	}
-
-	minimax_mcp_env := {
-		'MINIMAX_API_KEY':  client.api_key
-		'MINIMAX_API_HOST': 'https://api.minimaxi.com'
-	}
-	client.mcp_manager.add_lazy_server('MiniMax', 'uvx', ['--native-tls', 'minimax-coding-plan-mcp',
-		'-y'], minimax_mcp_env, builtin_mcp_tools())
-	println('[MCP] 已注册内置 MiniMax MCP (web_search, understand_image，按需启动)')
-	client.enable_tools = true
-}
-
 // init_mcp_external loads additional MCP servers from mcp.json and extensions.
 // Only called when --mcp flag is explicitly passed.
 fn init_mcp_external(mut client ApiClient) {
 	// Load additional servers from config file
 	mcp_configs := load_mcp_config()
 	if mcp_configs.len > 0 {
+		mut loaded_config_count := 0
 		for cfg in mcp_configs {
+			if cfg.name.trim_space().len == 0 || cfg.command.trim_space().len == 0 {
+				println('[MCP] ⚠️  跳过无效 MCP 配置: name="${cfg.name}" command="${cfg.command}"')
+				continue
+			}
 			client.mcp_manager.add_server(cfg.name, cfg.command, cfg.args, cfg.env)
+			loaded_config_count++
 		}
-		println('[MCP] 从配置文件加载了 ${mcp_configs.len} 个额外 MCP 服务')
+		if loaded_config_count > 0 {
+			println('[MCP] 从配置文件加载了 ${loaded_config_count} 个额外 MCP 服务')
+		}
 	}
 
 	// Load extension-provided MCP servers (from extension manifest mcpServers)
@@ -336,14 +320,14 @@ fn init_mcp_external(mut client ApiClient) {
 
 	// Check if any server connected successfully
 	mut connected := false
-	mut has_lazy_builtin := false
+	mut has_lazy_server := false
 	for server in client.mcp_manager.servers {
 		if server.is_connected {
 			connected = true
 			break
 		}
-		if server.lazy_start && server.preset_tools.len > 0 {
-			has_lazy_builtin = true
+		if server.lazy_start {
+			has_lazy_server = true
 		}
 	}
 
@@ -351,8 +335,8 @@ fn init_mcp_external(mut client ApiClient) {
 		return
 	}
 
-	if has_lazy_builtin {
-		println('[MCP] ⏳ 内置 MiniMax MCP 已就绪，将在首次调用 web_search / understand_image 时启动')
+	if has_lazy_server {
+		println('[MCP] ⏳ MCP 服务已就绪，将在首次调用时启动')
 	} else {
 		println('[MCP] ⚠️  注意: MCP服务初始化失败，将使用本地工具')
 		println('[MCP] 💡 对于网页分析，建议使用: curl/PowerShell下载 + read_file工具分析')
@@ -363,7 +347,7 @@ fn print_mcp_status(client ApiClient) {
 	println('🔌 MCP 服务状态:')
 	if client.mcp_manager.servers.len == 0 {
 		println('  (无 MCP 服务)')
-		println('  启动: 输入 "mcp start" 或使用 --mcp 参数')
+		println('  启动: 使用 --mcp 参数加载外部 MCP 服务，或输入 "mcp start" 启动已加载服务')
 		println('')
 		return
 	}

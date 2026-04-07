@@ -12,6 +12,20 @@ MCP 用于把外部工具以 stdio JSON-RPC 的方式接入到 CLI。
 
 - ~/.config/minimax/mcp.json
 
+### 示例配置
+
+```json
+{
+  "servers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    }
+  }
+}
+```
+
 ### 典型场景
 
 - Web 搜索。
@@ -21,10 +35,13 @@ MCP 用于把外部工具以 stdio JSON-RPC 的方式接入到 CLI。
 
 ### 行为特征
 
-- 内置 MiniMax MCP（web_search、understand_image）默认注册，懒加载（首次调用时才拉起子进程），无需额外标志。
-- 额外服务（mcp.json 中的外部 MCP 服务器）需要显式 --mcp 才会加载。
+- 外部 MCP 服务需要显式 --mcp 才会加载；默认不再预置 MiniMax MCP。
 - MCP 工具在运行时发现，不是编译期写死。
 - 退出时会尝试统一回收子进程。
+
+### 故障排查
+
+- 如果 `--mcp` 没有加载任何服务，请检查 `mcp.json` 中每个 server 是否同时包含非空 `name` 和 `command`；空值条目会被跳过并打印警告。
 
 ## Skills
 

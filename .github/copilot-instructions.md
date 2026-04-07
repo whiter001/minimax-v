@@ -69,7 +69,7 @@ v test src/config_test.v
 6. **MCP 协议 (`mcp.v`)**
    - JSON-RPC 2.0 客户端（stdio 上）用于 MCP 服务器
    - 管理 MCP 服务器生命周期（启动/停止）
-   - 从 MCP 服务器发现工具（如 web_search, understand_image）
+   - 从 MCP 服务器发现工具并按需接入
    - McpManager 用于集中管理服务器
 
 7. **高级特性**

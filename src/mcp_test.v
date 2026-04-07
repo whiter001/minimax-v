@@ -32,36 +32,27 @@ fn test_mcp_timeout_poll_attempts_rounds_up_small_timeouts() {
 	assert mcp_timeout_poll_attempts(250) == 3
 }
 
-fn test_builtin_mcp_tools_are_static() {
-	tools := builtin_mcp_tools()
-	assert tools.len == 2
-	assert tools[0].name == 'web_search'
-	assert tools[1].name == 'understand_image'
-}
-
 fn test_lazy_mcp_server_exposes_preset_tools_before_start() {
+	dummy_tool := McpTool{
+		name:        'demo_tool'
+		description: 'Demo preset tool.'
+		params:      []McpToolParam{}
+		raw_schema:  '{"type":"object","properties":{"value":{"type":"string","description":"Value."}},"required":["value"]}'
+	}
+	second_tool := McpTool{
+		name:        'second_tool'
+		description: 'Second preset tool.'
+		params:      []McpToolParam{}
+		raw_schema:  '{"type":"object","properties":{"flag":{"type":"boolean","description":"Flag."}},"required":["flag"]}'
+	}
 	mut manager := new_mcp_manager()
-	manager.add_lazy_server('MiniMax', 'uvx', ['--native-tls', 'minimax-coding-plan-mcp', '-y'],
-		{
+	manager.add_lazy_server('Demo', 'uvx', ['demo-server'], {
 		'MINIMAX_API_KEY': 'placeholder'
-	}, builtin_mcp_tools())
+	}, [dummy_tool, second_tool])
 	tools := manager.get_all_tools()
 	assert tools.len == 2
-	assert tools[0].name == 'web_search'
-	assert tools[1].name == 'understand_image'
-}
-
-fn test_builtin_understand_image_schema_includes_aliases() {
-	tool := builtin_understand_image_tool()
-	assert tool.raw_schema.contains('"image_path"')
-	assert tool.raw_schema.contains('"image_source"')
-	assert tool.raw_schema.contains('"path"')
-	assert tool.raw_schema.contains('"file"')
-	assert tool.raw_schema.contains('"prompt"')
-	assert tool.raw_schema.contains('"question"')
-	assert tool.raw_schema.contains('Primary image file path.')
-	assert tool.raw_schema.contains('Compatibility alias of image_path.')
-	assert tool.raw_schema.contains('Primary analysis instruction or question.')
+	assert tools[0].name == 'demo_tool'
+	assert tools[1].name == 'second_tool'
 }
 
 fn test_build_mcp_process_enables_process_group() {

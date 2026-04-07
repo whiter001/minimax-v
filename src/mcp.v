@@ -50,59 +50,6 @@ fn new_mcp_manager() McpManager {
 	}
 }
 
-fn new_mcp_tool_param(name string, description string, param_type string, required bool) McpToolParam {
-	return McpToolParam{
-		name:        name
-		description: description
-		param_type:  param_type
-		required:    required
-	}
-}
-
-fn new_mcp_tool(name string, description string, params []McpToolParam, raw_schema string) McpTool {
-	return McpTool{
-		name:        name
-		description: description
-		params:      params
-		raw_schema:  raw_schema
-	}
-}
-
-fn builtin_web_search_tool() McpTool {
-	return new_mcp_tool('web_search', 'Search the web and return relevant results.', [
-		new_mcp_tool_param('query', 'Search query string.', 'string', true),
-		new_mcp_tool_param('q', 'Alias of query.', 'string', false),
-		new_mcp_tool_param('prompt', 'Optional natural-language prompt.', 'string', false),
-	], '{"type":"object","properties":{"query":{"type":"string","description":"Search query string."},"q":{"type":"string","description":"Alias of query."},"prompt":{"type":"string","description":"Optional natural-language prompt."}},"required":["query"]}')
-}
-
-fn builtin_understand_image_tool() McpTool {
-	return new_mcp_tool('understand_image', 'Analyze an image file and answer questions about it.',
-		[
-		new_mcp_tool_param('image_path', 'Primary image file path.', 'string', true),
-		new_mcp_tool_param('image_source', 'Compatibility alias of image_path.', 'string',
-			false),
-		new_mcp_tool_param('path', 'Compatibility alias of image_path.', 'string', false),
-		new_mcp_tool_param('file', 'Compatibility alias of image_path.', 'string', false),
-		new_mcp_tool_param('prompt', 'Primary analysis instruction or question.', 'string',
-			false),
-		new_mcp_tool_param('question', 'Compatibility alias of prompt.', 'string', false),
-	], '{"type":"object","properties":{"image_path":{"type":"string","description":"Primary image file path."},"image_source":{"type":"string","description":"Compatibility alias of image_path."},"path":{"type":"string","description":"Compatibility alias of image_path."},"file":{"type":"string","description":"Compatibility alias of image_path."},"prompt":{"type":"string","description":"Primary analysis instruction or question."},"question":{"type":"string","description":"Compatibility alias of prompt."}},"required":["image_path"]}')
-}
-
-fn builtin_mcp_tools() []McpTool {
-	return [builtin_web_search_tool(), builtin_understand_image_tool()]
-}
-
-fn manager_has_server_named(m McpManager, name string) bool {
-	for server in m.servers {
-		if server.name == name {
-			return true
-		}
-	}
-	return false
-}
-
 fn (mut m McpManager) add_server(name string, command string, args []string, env map[string]string) {
 	mut server := &McpServer{
 		name:         name

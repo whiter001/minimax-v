@@ -231,8 +231,8 @@ Assert-Contains "--help 包含 @file 语法说明"   $r.Output "@path"
 # uvx / npx 可用性（信息性，不计入失败）
 Write-Section "外部工具可用性"
 $uvx = Get-Command uvx -ErrorAction SilentlyContinue
-if ($uvx) { Write-Pass "uvx 已安装 (内置 MiniMax MCP 可用)" }
-else       { Write-Warn "uvx 未安装，内置 MCP 测试将跳过 (pip install uv)" }
+if ($uvx) { Write-Pass "uvx 已安装 (可用于外部 MCP 服务器)" }
+else       { Write-Warn "uvx 未安装，外部 MCP 服务如需运行可先安装 uv" }
 
 $npx  = Get-Command npx  -ErrorAction SilentlyContinue
 $pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
@@ -798,33 +798,15 @@ if (-not $WithApi) {
     Remove-Item $verDir -Recurse -ErrorAction SilentlyContinue
 
     # ══════════════════════════════════════════════════════════════════
-    # R. 内置 MCP (web_search / understand_image)
+    # R. MCP 默认行为（不再预置内置工具）
     # ══════════════════════════════════════════════════════════════════
-    if ($uvx) {
-        Write-Section "R. 内置 MCP (web_search)"
-        Sleep-Rate 2
+    Write-Section "R. MCP 默认行为"
+    Sleep-Rate 2
 
-        $r = Invoke-Cli @('--mcp', '-p', '列出你能用的所有工具名称', '--max-tokens', '200') -Env $ApiEnv -Timeout 90
-        if ($r.Output -imatch 'web_search|understand_image') { Write-Pass "R1 MCP 工具列表含 web_search/understand_image" }
-        elseif ($r.Output -imatch '\[MCP\]|MCP.*启动|MCP.*可用') { Write-Pass "R1 MCP 服务已启动" }
-        elseif ($r.Output -imatch 'MCP.*失败|初始化失败') { Write-Warn "R1 MCP 启动失败" }
-        else { Write-Fail "R1 MCP 工具发现" ($r.Output.Split("`n") | Select-Object -First 5 | Out-String) }
-
-        Sleep-Rate 2
-        $r = Invoke-Cli @('--mcp', '-p', '使用 web_search 搜索 V lang 的当前最新版本号', '--max-tokens', '300') -Env $ApiEnv -Timeout 90
-        if ($r.Output -imatch 'web_search|vlang|version|V Programming') { Write-Pass "R2 web_search 搜索 V lang 有结果" }
-        elseif ($r.Output -imatch '\[TOOL\]|\[MCP\]') { Write-Pass "R2 web_search 工具被调用" }
-        elseif ($r.Output -imatch 'MCP.*失败') { Write-Warn "R2 web_search 网络不可达" }
-        else { Write-Fail "R2 web_search" ($r.Output.Split("`n") | Select-Object -First 5 | Out-String) }
-
-        Sleep-Rate 2
-        $r = Invoke-Cli @('--mcp', '-p', '用 web_search 查今天是几月几号', '--max-tokens', '200') -Env $ApiEnv -Timeout 90
-        if ($r.Output -imatch '\d{4}.*\d{1,2}|\d{1,2}月|March|February|January') { Write-Pass "R3 web_search 返回含日期实时信息" }
-        elseif ($r.Output -imatch '\[TOOL\]|\[MCP\]|web_search') { Write-Pass "R3 web_search 已调用" }
-        else { Write-Warn "R3 web_search 日期查询 (可能网络受限)" }
-    } else {
-        Write-Warn "跳过内置 MCP 测试 (uvx 未安装)"
-    }
+    $r = Invoke-Cli @('--mcp', '-p', '列出你能用的所有工具名称', '--max-tokens', '200') -Env $ApiEnv -Timeout 90
+    if ([string]::IsNullOrWhiteSpace($r.Output)) { Write-Fail "R1 MCP 默认行为" "无输出" }
+    elseif ($r.Output -imatch '内置 MiniMax MCP|默认注册|首次调用 web_search / understand_image') { Write-Fail "R1 MCP 默认行为仍暴露旧内置提示" ($r.Output.Split("`n") | Select-Object -First 5 | Out-String) }
+    else { Write-Pass "R1 MCP 默认行为不再暴露旧内置提示" }
 
     # ══════════════════════════════════════════════════════════════════
     # S. Playwright MCP

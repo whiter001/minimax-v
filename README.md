@@ -90,7 +90,7 @@ v -o minimax_cli src/
 使用 --mcp 时：
 
 - 从 ~/.config/minimax/mcp.json 加载额外 MCP 服务（如 Playwright）。
-- 内置 MiniMax MCP（web_search / understand_image）默认已注册，无需此标志。
+- 默认不预置 MiniMax MCP；如需 MCP 工具，请通过 --mcp 加载外部配置。
 
 ### 交互增强
 

@@ -103,20 +103,25 @@ fn test_build_request_json_with_tools() {
 	assert json.contains('call record_experience if you verified a stable fix')
 }
 
-fn test_build_request_json_with_lazy_builtin_mcp_tools() {
+fn test_build_request_json_with_lazy_mcp_tools() {
 	mut config := default_config()
 	config.api_key = 'test-key'
 	config.enable_tools = true
 	mut client := new_api_client(config)
 	client.mcp_manager = new_mcp_manager()
-	client.mcp_manager.add_lazy_server('MiniMax', 'uvx', ['--native-tls', 'minimax-coding-plan-mcp',
-		'-y'], {
+	dummy_tool := McpTool{
+		name:        'demo_tool'
+		description: 'Demo preset tool.'
+		params:      []McpToolParam{}
+		raw_schema:  '{"type":"object","properties":{"value":{"type":"string","description":"Value."}},"required":["value"]}'
+	}
+	client.mcp_manager.add_lazy_server('Demo', 'uvx', ['demo-server'], {
 		'MINIMAX_API_KEY': 'placeholder'
-	}, builtin_mcp_tools())
+	}, [dummy_tool])
 	client.add_message('user', 'test')
 	json := client.build_request_json()
-	assert json.contains('"name":"web_search"')
-	assert json.contains('"name":"understand_image"')
+	assert json.contains('"name":"demo_tool"')
+	assert json.contains('"description":"Demo preset tool."')
 }
 
 fn test_build_request_json_with_workspace() {

@@ -88,11 +88,11 @@ output=$($BINARY --help 2>&1)
 check_contains "--help 包含 --mcp 说明" "$output" "\-\-mcp"
 check_contains "--help 包含 MCP 配置路径" "$output" "mcp.json"
 
-# uvx 可用性检查（内置 MCP 依赖）
+# uvx 可用性检查（外部 MCP 服务器可能用到）
 if command -v uvx &>/dev/null; then
-    pass "uvx 已安装 (内置 MiniMax MCP 可用)"
+    pass "uvx 已安装 (可用于外部 MCP 服务器)"
 else
-    echo -e "  \033[33m⚠️  uvx 未安装，内置 MCP 需运行: pip install uv\033[0m"
+    echo -e "  \033[33m⚠️  uvx 未安装，外部 MCP 服务如需运行可先: pip install uv\033[0m"
 fi
 
 # npx 可用性检查（Playwright MCP 依赖）
@@ -189,47 +189,19 @@ if $WITH_API; then
     fi
 
     # ────────────────────────────────────────
-    # F. 内置 MCP 测试 (web_search / understand_image)
+    # F. MCP 默认行为（不再预置内置工具）
     # ────────────────────────────────────────
     echo ""
-    echo -e "  \033[1m▌ 内置 MCP 测试\033[0m"
+    echo -e "  \033[1m▌ MCP 默认行为\033[0m"
 
-    if ! command -v uvx &>/dev/null; then
-        echo -e "  \033[33m⏭  uvx 未安装，跳过内置 MCP 测试\033[0m"
+    echo "  ▶ 测试: --mcp 不再暴露旧的内置提示..."
+    output=$(timeout 90s $BINARY --mcp -p "列出所有可用工具名称" --max-tokens 200 2>&1 || true)
+    if [[ -z "$output" ]]; then
+        fail "MCP 默认行为" "无输出"
+    elif echo "$output" | grep -qiE "内置 MiniMax MCP|默认注册|首次调用 web_search / understand_image"; then
+        fail "MCP 默认行为仍暴露旧内置提示" "$(echo "$output" | head -5)"
     else
-        # F-1. MCP 服务启动与 web_search
-        echo "  ▶ 测试: 内置 MCP 启动 + web_search..."
-        output=$(timeout 90s $BINARY --mcp -p "使用 web_search 搜索 vlang.io 官网首页标题" \
-            --max-tokens 400 2>&1 || true)
-        if echo "$output" | grep -qi "\[MCP\].*工具\|MCP.*可用\|web_search\|vlang"; then
-            pass "内置 MCP 启动并调用 web_search"
-        elif echo "$output" | grep -qi "MCP.*失败\|MCP.*初始化失败"; then
-            echo -e "  \033[33m⚠️  内置 MCP 服务启动失败 (网络/uvx 问题)，记录为警告\033[0m"
-            echo "  输出样例: $(echo "$output" | grep -i 'MCP' | head -3)"
-        else
-            fail "内置 MCP web_search" "$(echo "$output" | head -5)"
-        fi
-
-        # F-2. MCP web_search 结果包含关键词
-        echo "  ▶ 测试: web_search 返回实质内容..."
-        output=$(timeout 90s $BINARY --mcp -p "用 web_search 搜索 '今日日期' 并直接告诉我结果" \
-            --max-tokens 200 2>&1 || true)
-        if echo "$output" | grep -qiE "[0-9]{4}年|[0-9]{4}-[0-9]{2}|2026|date"; then
-            pass "web_search 返回含日期的实质内容"
-        elif echo "$output" | grep -qi "\[TOOL\]"; then
-            pass "web_search 调用了工具 (有响应)"
-        else
-            echo -e "  \033[33m⚠️  web_search 结果无法验证（可能网络受限），跳过\033[0m"
-        fi
-
-        # F-3. understand_image (仅语义验证能力存在)
-        echo "  ▶ 测试: understand_image 工具声明..."
-        output=$(timeout 60s $BINARY --mcp -p "列出所有可用工具名称" --max-tokens 200 2>&1 || true)
-        if echo "$output" | grep -qi "understand_image\|web_search"; then
-            pass "MCP 工具列表包含 understand_image / web_search"
-        else
-            echo -e "  \033[33m⚠️  无法确认工具列表（可能 MCP 未连接），跳过\033[0m"
-        fi
+        pass "MCP 默认行为不再暴露旧内置提示"
     fi
 
     # ────────────────────────────────────────
