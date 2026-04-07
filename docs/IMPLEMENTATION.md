@@ -134,7 +134,7 @@
 
 ### [src/cron.v](../src/cron.v) 和 [src/cron_cli.v](../src/cron_cli.v)
 
-负责本地 Cron 调度与命令行子命令。
+负责本地 Cron 调度、命令行子命令，以及 `cron dashboard` 的 veb + SQLite 本地视图。
 
 ### [src/nodes.v](../src/nodes.v)
 

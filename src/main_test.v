@@ -54,6 +54,7 @@ fn test_build_help_text_mentions_term_ui() {
 	assert help.contains('auto_check_sops=true')
 	assert help.contains('--term-ui                      使用 term.ui 终端界面（交互模式）')
 	assert help.contains('minimax_cli cron ...')
+	assert help.contains('minimax_cli cron dashboard')
 }
 
 fn test_is_headless_plain_output() {

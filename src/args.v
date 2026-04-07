@@ -379,6 +379,7 @@ fn build_help_text() string {
 		'  minimax_cli --version          显示版本信息',
 		'  minimax_cli --quota            查看 Coding Plan 剩余用量',
 		'  minimax_cli cron ...           本地 Cron 任务管理',
+		'  minimax_cli cron dashboard     启动本地 Cron dashboard',
 		'  minimax_cli --term-ui          启动 term.ui 交互界面',
 		'  minimax_cli --skills           列出所有可用技能',
 		'',

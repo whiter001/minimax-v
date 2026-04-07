@@ -32,6 +32,13 @@ fn test_execute_cron_cli_command_help() {
 	assert output.contains('minimax_cli cron <command>')
 	assert output.contains('cron run')
 	assert output.contains('cron delay <seconds> <name> <command...>')
+	assert output.contains('cron dashboard [port]')
+}
+
+fn test_parse_cron_dashboard_port() {
+	assert parse_cron_dashboard_port([]string{}) or { panic(err) } == 8787
+	assert parse_cron_dashboard_port(['9001']) or { panic(err) } == 9001
+	assert parse_cron_dashboard_port(['--port', '9002']) or { panic(err) } == 9002
 }
 
 fn test_execute_cron_cli_command_add_and_show() {

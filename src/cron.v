@@ -206,6 +206,7 @@ pub fn (scheduler CronScheduler) save() ! {
 	data := json.encode(job_list)
 	file_path := os.join_path(scheduler.storage_path, 'cron_jobs.json')
 	os.write_file(file_path, data)!
+	sync_cron_dashboard_jobs(scheduler) or {}
 }
 
 // 从磁盘加载任务

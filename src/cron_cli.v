@@ -256,6 +256,7 @@ fn execute_cron_job(job CronJob) ! {
 	}
 	lines << ''
 	append_cron_job_log(job.id, lines.join('\n'))!
+	record_cron_dashboard_execution(job, started_at, finished_at, exit_code, output) or {}
 	if exit_code != 0 {
 		return error('Cron 任务执行失败（exit ${exit_code}）')
 	}
@@ -278,6 +279,7 @@ fn cron_help_text() string {
 		'  cron stats',
 		'  cron tick',
 		'  cron log <id>',
+		'  cron dashboard [port]',
 		'  cron run',
 		'  cron daemon start|stop|restart|status',
 		'  cron timer <command> [args]',
@@ -287,12 +289,14 @@ fn cron_help_text() string {
 		'  delay/add-once 用于一次性延迟执行，任务执行后会自动停用',
 		'  cron run 会常驻运行并每 30 秒检查一次任务',
 		'  cron daemon 管理后台常驻进程（创建任务时如未运行会自动启动）',
+		'  cron dashboard 启动本地 veb + SQLite 视图（默认绑定 127.0.0.1）',
 		'  cron timer 提供类似 JS setTimeout/setInterval 的可取消定时器',
 		'  任务持久化目录: ${cron_storage_path()}',
 		'',
 		'示例:',
 		'  minimax_cli cron add x-latest "*/5 * * * *" /Users/byf/bl/github/minimax-v/minimax_cli --mcp -p "打开 x.com，获取最新动态并用中文总结"',
 		'  minimax_cli cron delay 60 x-once /Users/byf/bl/github/minimax-v/minimax_cli --mcp -p "1分钟后打开 x.com，获取最新动态并用中文总结"',
+		'  minimax_cli cron dashboard 8787',
 		'  minimax_cli cron list',
 		'  minimax_cli cron run',
 		'  minimax_cli cron daemon status',
@@ -674,6 +678,7 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			if should_auto_start_cron_daemon() && !is_daemon_running() {
 				start_cron_daemon() or { return '❌ 启动 Cron daemon 失败: ${err}', 1 }
 			}
+			sync_cron_dashboard_jobs(scheduler) or {}
 			return '✅ Cron 任务已创建\n' + build_cron_job_text(job), 0
 		}
 		'delay', 'add-once' {
@@ -691,6 +696,7 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			if should_auto_start_cron_daemon() && !is_daemon_running() {
 				start_cron_daemon() or { return '❌ 启动 Cron daemon 失败: ${err}', 1 }
 			}
+			sync_cron_dashboard_jobs(scheduler) or {}
 			return '✅ 一次性 Cron 任务已创建\n' + build_cron_job_text(job), 0
 		}
 		'show' {
@@ -705,6 +711,7 @@ fn execute_cron_cli_command(args []string) (string, int) {
 				return '用法: minimax_cli cron delete <id>', 2
 			}
 			scheduler.delete_job(args[1]) or { return '❌ 删除 Cron 任务失败: ${err}', 1 }
+			sync_cron_dashboard_jobs(scheduler) or {}
 			return '✅ 已删除 Cron 任务: ${args[1]}', 0
 		}
 		'enable' {
@@ -714,6 +721,7 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			scheduler.set_job_enabled(args[1], true) or {
 				return '❌ 启用 Cron 任务失败: ${err}', 1
 			}
+			sync_cron_dashboard_jobs(scheduler) or {}
 			return '✅ 已启用 Cron 任务: ${args[1]}', 0
 		}
 		'disable' {
@@ -723,10 +731,20 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			scheduler.set_job_enabled(args[1], false) or {
 				return '❌ 禁用 Cron 任务失败: ${err}', 1
 			}
+			sync_cron_dashboard_jobs(scheduler) or {}
 			return '✅ 已禁用 Cron 任务: ${args[1]}', 0
 		}
 		'stats' {
 			return build_cron_stats_text(scheduler.get_stats()), 0
+		}
+		'dashboard' {
+			port := parse_cron_dashboard_port(args[1..]) or {
+				return '❌ 启动 Cron dashboard 失败: ${err}', 1
+			}
+			start_cron_dashboard_server(port) or {
+				return '❌ 启动 Cron dashboard 失败: ${err}', 1
+			}
+			return '', 0
 		}
 		'log' {
 			if args.len < 2 {
@@ -741,6 +759,7 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			scheduler.start()
 			scheduler.tick() or { return '❌ Cron tick 执行失败: ${err}', 1 }
 			scheduler.stop()
+			sync_cron_dashboard_jobs(scheduler) or {}
 			return '✅ Cron tick 执行完成', 0
 		}
 		'run' {
@@ -819,6 +838,34 @@ fn execute_cron_cli_command(args []string) (string, int) {
 			return '未知 cron 命令: ${args[0]}\n\n' + cron_help_text(), 2
 		}
 	}
+}
+
+fn parse_cron_dashboard_port(args []string) !int {
+	if args.len == 0 {
+		return 8787
+	}
+	if args[0] == '--port' {
+		if args.len < 2 {
+			return error('用法: minimax_cli cron dashboard [port]')
+		}
+		return parse_dashboard_port(args[1])
+	}
+	if args.len > 1 {
+		return error('用法: minimax_cli cron dashboard [port]')
+	}
+	return parse_dashboard_port(args[0])
+}
+
+fn parse_dashboard_port(raw string) !int {
+	trimmed := raw.trim_space()
+	if trimmed.len == 0 {
+		return error('端口不能为空')
+	}
+	port := trimmed.int()
+	if port <= 0 || port > 65535 || trimmed != port.str() {
+		return error('无效端口: ${raw}')
+	}
+	return port
 }
 
 // cron_tool_handler - AI tool interface for cron operations
