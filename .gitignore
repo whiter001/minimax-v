@@ -39,3 +39,4 @@ bash_out_*
 nul
 .codebuddy/
 artifacts/
+tmp/

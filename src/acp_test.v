@@ -45,3 +45,48 @@ fn test_acp_unknown_method() {
 	resp := server.handle_request('{"jsonrpc":"2.0","id":99,"method":"unknownMethod","params":{}}')
 	assert resp.contains('"code":-32601')
 }
+
+fn test_acp_ping() {
+	mut server := new_test_acp_server()
+	resp := server.handle_request('{"jsonrpc":"2.0","id":100,"method":"ping","params":{}}')
+	assert resp.contains('"id":100')
+	assert resp.contains('"result"')
+	assert resp.contains('"timestamp"')
+}
+
+fn test_acp_tools_list() {
+	mut server := new_test_acp_server()
+	resp := server.handle_request('{"jsonrpc":"2.0","id":101,"method":"tools/list","params":{}}')
+	assert resp.contains('"id":101')
+	assert resp.contains('"result"')
+	assert resp.contains('"str_replace_editor"')
+	assert resp.contains('"bash"')
+	assert resp.contains('"generate_image"')
+	assert resp.contains('"generate_speech"')
+}
+
+fn test_acp_sampling() {
+	mut server := new_test_acp_server()
+	resp := server.handle_request('{"jsonrpc":"2.0","id":102,"method":"sampling","params":{"message":{"role":"user","content":[{"type":"text","text":"hello"}]}}}')
+	assert resp.contains('"id":102')
+	assert resp.contains('"code":-32601')
+	assert resp.contains('not implemented')
+}
+
+fn test_acp_logging() {
+	mut server := new_test_acp_server()
+	resp := server.handle_request('{"jsonrpc":"2.0","id":103,"method":"logging","params":{"level":"debug","logger":"test","data":"hello"}}')
+	assert resp.contains('"id":103')
+	assert resp.contains('"result"')
+	assert resp.contains('"received":true')
+}
+
+fn test_acp_initialize_capabilities() {
+	mut server := new_test_acp_server()
+	resp := server.handle_request('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')
+	assert resp.contains('"streaming":true')
+	assert resp.contains('"chatAvailability":"eager"')
+	assert resp.contains('"pushNotifications"')
+	assert resp.contains('"loadSession"')
+	assert resp.contains('"memory"')
+}

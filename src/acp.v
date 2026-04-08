@@ -60,8 +60,38 @@ fn (mut s AcpServer) handle_request(line string) string {
 			if id_raw.len == 0 {
 				return ''
 			}
-			result := '{"protocolVersion":1,"agentCapabilities":{"loadSession":false},"agentInfo":{"name":"minimax-v","title":"MiniMax V-Lang CLI","version":"${version}"}}'
+			result := '{"protocolVersion":1,"agentCapabilities":{"streaming":true,"chatAvailability":"eager","pushNotifications":{"level":"none"},"loadSession":{"supported":false,"_convenience":false},"memory":{"supported":false}},"agentInfo":{"name":"minimax-v","title":"MiniMax V-Lang CLI","version":"${version}"}}'
 			return build_acp_result(id_raw, result)
+		}
+		'ping' {
+			if id_raw.len == 0 {
+				return ''
+			}
+			return build_acp_result(id_raw, '{"timestamp":${time.now().unix_milli()}}')
+		}
+		'tools/list' {
+			if id_raw.len == 0 {
+				return ''
+			}
+			tools_json := get_tools_schema_json()
+			return build_acp_result(id_raw, tools_json)
+		}
+		'sampling' {
+			if id_raw.len == 0 {
+				return ''
+			}
+			params := parse_json_string_object(params_raw)
+			message := params['message'] or { '' }
+			if message.len > 0 {
+				return build_acp_error(id_raw, -32601, 'sampling not implemented: streaming not supported in stdio mode')
+			}
+			return build_acp_error(id_raw, -32601, 'sampling not implemented')
+		}
+		'logging' {
+			if id_raw.len == 0 {
+				return ''
+			}
+			return build_acp_result(id_raw, '{"received":true}')
 		}
 		'newSession' {
 			if id_raw.len == 0 {
