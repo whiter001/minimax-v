@@ -37,8 +37,12 @@
 
 ```bash
 ./build.sh
+# 开发构建:
 v -o minimax_cli src/
+# 生产构建:
 v -prod .
+# 调试构建:
+v -g -o minimax_cli src/
 ```
 
 ### 运行

@@ -1,4 +1,4 @@
-@include 'cron_dashboard_header.html'
+@include 'cron_dashboard_header_v2.html'
 <section class="hero">
   <div class="hero-copy">
     <p class="eyebrow">MiniMax Cron Dashboard</p>
@@ -60,8 +60,24 @@
       </div>
       <div class="job-actions">
         <button class="btn btn-sm btn-success" data-action="run" data-id="@job.job_id">Run</button>
+        <button
+          class="btn btn-sm btn-primary"
+          data-action="edit"
+          data-id="@job.job_id"
+          data-name="@job.name"
+          data-schedule="@job.schedule"
+          data-command="@job.command"
+          data-run-once="@job.run_once"
+          data-next-run="@job.next_run"
+        >
+          Edit
+        </button>
         <button class="btn btn-sm @job.status_class" data-action="toggle" data-id="@job.job_id">
-          @if job.enabled Disable @else Enable @end
+          @if job.enabled
+          Disable
+          @else
+          Enable
+          @end
         </button>
         <button class="btn btn-sm btn-danger" data-action="delete" data-id="@job.job_id">Del</button>
       </div>
@@ -156,19 +172,19 @@
       </div>
       <div class="form-group">
         <label>任务类型</label>
-        <select name="type" id="job-type" onchange="toggleDelayField()">
+        <select name="type" id="create-job-type" onchange="toggleJobTypeField('create')">
           <option value="cron">循环任务 (Cron)</option>
           <option value="once">一次性任务 (Delay)</option>
         </select>
       </div>
-      <div class="form-group" id="delay-field" style="display:none">
+      <div class="form-group" id="create-delay-field" style="display:none">
         <label>延迟秒数</label>
         <input type="number" name="delay_seconds" placeholder="60" min="1" value="60">
       </div>
-      <div class="form-group" id="schedule-field">
+      <div class="form-group" id="create-schedule-field">
         <label>Cron 表达式</label>
-        <input type="text" name="schedule" placeholder="@hourly 或 */5 * * * *" value="@hourly">
-        <small>预设: @hourly, @daily, @weekly, @monthly</small>
+        <input type="text" name="schedule" placeholder="&#64;hourly 或 */5 * * * *" value="&#64;hourly">
+        <small>预设: &#64;hourly, &#64;daily, &#64;weekly, &#64;monthly</small>
       </div>
       <div class="form-group">
         <label>执行命令</label>
@@ -177,6 +193,46 @@
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" onclick="closeCreateModal()">取消</button>
         <button type="submit" class="btn btn-primary">创建</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="edit-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>编辑定时任务</h2>
+      <button class="modal-close" onclick="closeEditModal()">×</button>
+    </div>
+    <form id="edit-form">
+      <input type="hidden" name="id" id="edit-job-id">
+      <div class="form-group">
+        <label>任务名称</label>
+        <input type="text" name="name" id="edit-job-name" required>
+      </div>
+      <div class="form-group">
+        <label>任务类型</label>
+        <select name="type" id="edit-job-type" onchange="toggleJobTypeField('edit')">
+          <option value="cron">循环任务 (Cron)</option>
+          <option value="once">一次性任务 (Delay)</option>
+        </select>
+      </div>
+      <div class="form-group" id="edit-delay-field" style="display:none">
+        <label>延迟秒数</label>
+        <input type="number" name="delay_seconds" id="edit-delay-seconds" min="1" value="60">
+      </div>
+      <div class="form-group" id="edit-schedule-field">
+        <label>Cron 表达式</label>
+        <input type="text" name="schedule" id="edit-schedule" placeholder="&#64;hourly 或 */5 * * * *">
+        <small>预设: &#64;hourly, &#64;daily, &#64;weekly, &#64;monthly</small>
+      </div>
+      <div class="form-group">
+        <label>执行命令</label>
+        <textarea name="command" id="edit-command" required></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeEditModal()">取消</button>
+        <button type="submit" class="btn btn-primary">保存</button>
       </div>
     </form>
   </div>
@@ -200,4 +256,4 @@
 </div>
 
 <div id="toast" class="toast"></div>
-@include 'cron_dashboard_footer.html'
+@include 'cron_dashboard_footer_v2.html'

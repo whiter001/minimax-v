@@ -1,6 +1,7 @@
 </main>
 <script>
 let deleteTargetId = '';
+let editTargetId = '';
 
 function showToast(message, type) {
   const toast = document.getElementById('toast');
@@ -12,38 +13,75 @@ function showToast(message, type) {
 function openCreateModal() {
   document.getElementById('create-modal').classList.add('show');
   document.getElementById('create-form').reset();
-  toggleDelayField();
+  toggleJobTypeField('create');
 }
 
 function closeCreateModal() {
   document.getElementById('create-modal').classList.remove('show');
 }
 
-function toggleDelayField() {
-  const type = document.getElementById('job-type').value;
-  document.getElementById('delay-field').style.display = type === 'once' ? 'block' : 'none';
-  document.getElementById('schedule-field').style.display = type === 'once' ? 'none' : 'block';
+function closeEditModal() {
+  document.getElementById('edit-modal').classList.remove('show');
+  editTargetId = '';
 }
 
-document.getElementById('create-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const form = e.target;
-  const fd = new FormData(form);
-  const params = new URLSearchParams(fd);
-  try {
-    const res = await fetch('/api/jobs', { method: 'POST', body: params });
+function toggleJobTypeField(prefix) {
+  const type = document.getElementById(prefix + '-job-type').value;
+  document.getElementById(prefix + '-delay-field').style.display = type === 'once' ? 'block' : 'none';
+  document.getElementById(prefix + '-schedule-field').style.display = type === 'once' ? 'none' : 'block';
+}
+
+function computeDelaySeconds(nextRun) {
+  const now = Math.floor(Date.now() / 1000);
+  const remaining = nextRun - now;
+  return remaining > 0 ? remaining : 1;
+}
+
+function submitJobForm(url, method, form, onSuccessMessage, onClose) {
+  return (async () => {
+    const fd = new FormData(form);
+    const params = new URLSearchParams(fd);
+    const request_url = url + '?' + params.toString();
+    const res = await fetch(request_url, { method });
     const data = await res.json();
     if (data.success) {
-      showToast('任务创建成功');
-      closeCreateModal();
+      showToast(onSuccessMessage);
+      onClose();
       setTimeout(() => location.reload(), 500);
     } else {
-      showToast('错误: ' + data.error, 'error');
+      showToast('错误: ' + (data.error || 'unknown'), 'error');
     }
-  } catch (e) {
+  })();
+}
+
+document.getElementById('create-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  submitJobForm('/api/jobs', 'POST', e.target, '任务创建成功', closeCreateModal).catch(() => {
     showToast('创建失败', 'error');
-  }
+  });
 });
+
+document.getElementById('edit-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!editTargetId) return;
+  submitJobForm('/api/jobs/update', 'POST', e.target, '任务更新成功', closeEditModal).catch(() => {
+    showToast('更新失败', 'error');
+  });
+});
+
+function openEditModal(btn) {
+  const runOnce = btn.dataset.runOnce === 'true';
+  const nextRun = parseInt(btn.dataset.nextRun || '0', 10);
+  editTargetId = btn.dataset.id;
+  document.getElementById('edit-job-id').value = editTargetId;
+  document.getElementById('edit-job-name').value = btn.dataset.name || '';
+  document.getElementById('edit-command').value = btn.dataset.command || '';
+  document.getElementById('edit-job-type').value = runOnce ? 'once' : 'cron';
+  document.getElementById('edit-schedule').value = btn.dataset.schedule || '';
+  document.getElementById('edit-delay-seconds').value = runOnce ? String(computeDelaySeconds(nextRun)) : '60';
+  toggleJobTypeField('edit');
+  document.getElementById('edit-modal').classList.add('show');
+}
 
 function closeDeleteModal() {
   document.getElementById('delete-modal').classList.remove('show');
@@ -73,6 +111,7 @@ document.addEventListener('click', (e) => {
   const action = btn.dataset.action;
   const id = btn.dataset.id;
   if (action === 'run') runJob(id);
+  else if (action === 'edit') openEditModal(btn);
   else if (action === 'toggle') toggleJob(id);
   else if (action === 'delete') {
     deleteTargetId = id;

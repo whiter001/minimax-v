@@ -307,6 +307,66 @@ fn test_cron_scheduler_delete_nonexistent_fails() {
 	assert false, '删除不存在的任务应失败'
 }
 
+fn test_cron_scheduler_update_job() {
+	tmp := cron_test_tmp_dir('cron_test_update')
+	defer { os.rmdir_all(tmp) or {} }
+
+	mut sched := new_cron_scheduler(tmp, fn (job CronJob) ! {}) or {
+		assert false, '创建调度器失败: ${err}'
+		return
+	}
+
+	job := sched.add_job('update-job', '@hourly', 'echo old') or {
+		assert false, '添加任务失败: ${err}'
+		return
+	}
+
+	updated := sched.update_job(job.id, CronJobUpdateInput{
+		name:     'update-job-v2'
+		schedule: '@daily'
+		command:  'echo new'
+		run_once: false
+		enabled:  true
+	}) or {
+		assert false, '更新任务失败: ${err}'
+		return
+	}
+	assert updated.name == 'update-job-v2'
+	assert updated.schedule == '@daily'
+	assert updated.command == 'echo new'
+	assert updated.run_once == false
+	assert updated.enabled == true
+	assert updated.next_run > time.now().unix()
+
+	mut sched2 := new_cron_scheduler(tmp, fn (job CronJob) ! {}) or {
+		assert false, '重新加载调度器失败: ${err}'
+		return
+	}
+	reloaded := sched2.get_job(job.id) or {
+		assert false, '更新后的任务应可重新加载'
+		return
+	}
+	assert reloaded.name == 'update-job-v2'
+	assert reloaded.schedule == '@daily'
+	assert reloaded.command == 'echo new'
+
+	once_updated := sched2.update_job(job.id, CronJobUpdateInput{
+		name:          'update-job-once'
+		schedule:      '@daily'
+		command:       'echo once'
+		run_once:      true
+		enabled:       false
+		delay_seconds: 120
+	}) or {
+		assert false, '切换为一次性任务失败: ${err}'
+		return
+	}
+	assert once_updated.run_once
+	assert once_updated.enabled == false
+	assert once_updated.schedule.starts_with('@once ')
+	assert once_updated.next_run > time.now().unix()
+}
+
 fn test_cron_scheduler_set_enabled() {
 	tmp := cron_test_tmp_dir('cron_test_enable')
 	mut sched := new_cron_scheduler(tmp, fn (job CronJob) ! {}) or { return }

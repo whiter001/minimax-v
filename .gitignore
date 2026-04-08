@@ -40,3 +40,4 @@ nul
 .codebuddy/
 artifacts/
 tmp/
+*.def

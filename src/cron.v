@@ -35,6 +35,15 @@ pub mut:
 	daemon_start_mtime int                 // daemon 启动时的二进制 mtime，用于检测 rebuild
 }
 
+struct CronJobUpdateInput {
+	name          string
+	schedule      string
+	command       string
+	run_once      bool
+	enabled       bool
+	delay_seconds int
+}
+
 pub struct CronTime {
 	minute  int
 	hour    int
@@ -134,6 +143,55 @@ pub fn (mut scheduler CronScheduler) delete_job(id string) ! {
 
 	scheduler.jobs.delete(id)
 	scheduler.save()!
+}
+
+// 更新任务
+pub fn (mut scheduler CronScheduler) update_job(id string, input CronJobUpdateInput) !CronJob {
+	if id !in scheduler.jobs {
+		return error('任务不存在')
+	}
+
+	name := input.name.trim_space()
+	if name.len == 0 {
+		return error('任务名称不能为空')
+	}
+
+	command := input.command.trim_space()
+	if command.len == 0 {
+		return error('任务命令不能为空')
+	}
+
+	mut job := scheduler.jobs[id]
+	job.name = name
+	job.command = command
+	job.enabled = input.enabled
+
+	if input.run_once {
+		if input.delay_seconds <= 0 {
+			return error('一次性任务的延迟秒数必须大于 0')
+		}
+		next_run := time.now().unix() + i64(input.delay_seconds)
+		job.run_once = true
+		job.schedule = '@once ${time.unix(next_run).utc_to_local().format_ss()}'
+		job.next_run = next_run
+	} else {
+		validate_cron_expression(input.schedule)!
+		job.run_once = false
+		job.schedule = input.schedule.trim_space()
+		job.next_run = calculate_next_run(job.schedule)
+	}
+
+	scheduler.jobs[id] = job
+	scheduler.save()!
+	return job
+}
+
+fn default_once_delay_seconds(job CronJob) int {
+	remaining := job.next_run - time.now().unix()
+	if remaining <= 0 {
+		return 1
+	}
+	return int(remaining)
 }
 
 // 启动调度器（后台运行）
