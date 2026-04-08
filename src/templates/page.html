@@ -1,0 +1,135 @@
+@include 'cron_dashboard_header.html'
+<section class="hero">
+  <div class="hero-copy">
+    <p class="eyebrow">MiniMax Cron Dashboard</p>
+    <h1>静态任务与执行视图</h1>
+    <p>@subtitle</p>
+  </div>
+  <div class="hero-meta">
+    @for metric in metrics
+    <article class="metric-card @metric.accent">
+      <div class="metric-title">@metric.title</div>
+      <div class="metric-value">@metric.value</div>
+      <div class="metric-note">@metric.note</div>
+    </article>
+    @end
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head">
+    <div>
+      <h2>Cron 任务</h2>
+      <div class="section-note">存储目录：<code>@storage_path</code></div>
+    </div>
+    <div class="section-note">
+      SQLite：<code>@db_path</code> · 端口 <code>@port</code> · 刷新
+      <code>@refresh_seconds</code>s · 生成于 <code>@generated_at</code>
+    </div>
+  </div>
+  @if has_jobs
+  <div class="cards-grid">
+    @for job in job_cards
+    <article class="card">
+      <div class="card-head">
+        <div>
+          <h3>@job.name</h3>
+          <div class="badge-row">
+            <span class="badge @job.status_class">@job.status_label</span>
+            <span class="badge @job.type_class">@job.type_label</span>
+          </div>
+        </div>
+        <div class="card-id">@job.job_id</div>
+      </div>
+      <div class="job-grid">
+        <div class="field"><span>计划</span><strong>@job.schedule</strong></div>
+        <div class="field"><span>命令</span><strong>@job.command</strong></div>
+        <div class="field">
+          <span>下次执行</span><strong>@job.next_run</strong>
+        </div>
+        <div class="field">
+          <span>上次执行</span><strong>@job.last_run</strong>
+        </div>
+        <div class="field">
+          <span>执行次数</span><strong>@job.execution_count</strong>
+        </div>
+        <div class="field"><span>日志</span><strong>@job.log_path</strong></div>
+      </div>
+      @if job.has_latest
+      <div class="latest @job.latest_status_class">
+        <div class="latest-title">
+          最近执行 · @job.latest_status_label · exit @job.latest_exit_code
+        </div>
+        <div class="latest-meta">
+          完成于 @job.latest_finished_at · 用时 @job.latest_duration_ms ms
+        </div>
+        @if job.latest_output.len > 0
+        <pre class="output">@job.latest_output</pre>
+        @else
+        <div class="output muted">无输出</div>
+        @end
+      </div>
+      @else
+      <div class="latest muted">
+        <div class="latest-title">最近执行</div>
+        <div class="latest-meta">暂无执行记录</div>
+      </div>
+      @end
+    </article>
+    @end
+  </div>
+  @else
+  <div class="empty-state">@job_empty_state</div>
+  @end
+</section>
+
+<section class="section">
+  <div class="section-head">
+    <div>
+      <h2>最近执行</h2>
+      <div class="section-note">按开始时间倒序展示，最多 20 条</div>
+    </div>
+  </div>
+  @if has_executions
+  <div class="execution-list">
+    @for execution in execution_cards
+    <article class="execution-card">
+      <div class="execution-head">
+        <div>
+          <strong>@execution.job_name</strong>
+          <div class="execution-meta">
+            @execution.job_id · @execution.started_at → @execution.finished_at
+          </div>
+        </div>
+        <div class="badge-row">
+          <span class="badge @execution.status_class"
+            >@execution.status_label</span
+          >
+        </div>
+      </div>
+      <div class="execution-stats">
+        @execution.schedule · @execution.command · @execution.duration_ms ms
+      </div>
+      @if execution.has_output
+      <pre class="output">@execution.output</pre>
+      @else
+      <div class="output muted">无输出</div>
+      @end
+    </article>
+    @end
+  </div>
+  @else
+  <div class="empty-state">@execution_empty_state</div>
+  @end
+</section>
+
+<div class="footer">
+  页面由 <code>veb</code> 提供，数据由 <code>sqlite3</code> CLI 写入
+  <code>@db_path</code>。
+  <br />
+  你可以用 <code>minimax_cli cron list</code>、<code
+    >minimax_cli cron stats</code
+  >、<code>minimax_cli cron tick</code> 和
+  <code>minimax_cli cron dashboard</code> 持续观察变化。
+</div>
+@include 'cron_dashboard_footer.html'

@@ -58,6 +58,53 @@ struct CronDashboardSnapshot {
 	executions        []CronDashboardExecutionView
 }
 
+struct CronDashboardMetricView {
+	title  string
+	value  string
+	note   string
+	accent string
+}
+
+struct CronDashboardJobCardView {
+	job_id              string
+	name                string
+	schedule            string
+	command             string
+	run_once            bool
+	enabled             bool
+	last_run            string
+	next_run            string
+	execution_count     int
+	log_path            string
+	status_label        string
+	status_class        string
+	type_label          string
+	type_class          string
+	has_latest          bool
+	latest_status_label string
+	latest_status_class string
+	latest_exit_code    int
+	latest_finished_at  string
+	latest_duration_ms  i64
+	latest_output       string
+}
+
+struct CronDashboardExecutionCardView {
+	id           int
+	job_name     string
+	job_id       string
+	schedule     string
+	command      string
+	started_at   string
+	finished_at  string
+	duration_ms  i64
+	exit_code    int
+	output       string
+	has_output   bool
+	status_label string
+	status_class string
+}
+
 fn cron_dashboard_db_path() string {
 	return os.join_path(cron_storage_path(), 'dashboard.sqlite')
 }
@@ -110,6 +157,105 @@ fn latest_execution_for_job(executions []CronDashboardExecutionView, job_id stri
 		}
 	}
 	return none
+}
+
+fn cron_dashboard_metric_views(snapshot CronDashboardSnapshot) []CronDashboardMetricView {
+	return [
+		CronDashboardMetricView{
+			title:  '任务总数'
+			value:  snapshot.total_jobs.str()
+			note:   '运行中与已停用任务的总和'
+			accent: 'accent'
+		},
+		CronDashboardMetricView{
+			title:  '已启用'
+			value:  snapshot.enabled_jobs.str()
+			note:   '还能继续按计划触发的任务'
+			accent: 'accent'
+		},
+		CronDashboardMetricView{
+			title:  '执行记录'
+			value:  snapshot.total_executions.str()
+			note:   '最近 20 条执行历史'
+			accent: 'accent'
+		},
+		CronDashboardMetricView{
+			title:  '失败记录'
+			value:  snapshot.failed_executions.str()
+			note:   'exit code 非 0 的执行'
+			accent: 'accent'
+		},
+	]
+}
+
+fn cron_dashboard_job_card_views(snapshot CronDashboardSnapshot) []CronDashboardJobCardView {
+	mut views := []CronDashboardJobCardView{}
+	for job in snapshot.jobs {
+		latest := latest_execution_for_job(snapshot.executions, job.job_id)
+		mut latest_status_label := ''
+		mut latest_status_class := ''
+		mut latest_exit_code := 0
+		mut latest_finished_at := ''
+		mut latest_duration_ms := i64(0)
+		mut latest_output := ''
+		mut has_latest := false
+		if latest_execution := latest {
+			has_latest = true
+			latest_status_label = execution_status_label(latest_execution.exit_code)
+			latest_status_class = execution_status_class(latest_execution.exit_code)
+			latest_exit_code = latest_execution.exit_code
+			latest_finished_at = format_cron_timestamp(latest_execution.finished_at)
+			latest_duration_ms = latest_execution.duration_ms
+			latest_output = utf8_safe_truncate(latest_execution.output.trim_space(), 240)
+		}
+		views << CronDashboardJobCardView{
+			job_id:              job.job_id
+			name:                job.name
+			schedule:            job.schedule
+			command:             utf8_safe_truncate(job.command, 220)
+			run_once:            job.run_once
+			enabled:             job.enabled
+			last_run:            format_cron_timestamp(job.last_run)
+			next_run:            format_cron_timestamp(job.next_run)
+			execution_count:     job.execution_count
+			log_path:            cron_job_log_path(job.job_id)
+			status_label:        if job.enabled { 'enabled' } else { 'disabled' }
+			status_class:        if job.enabled { 'success' } else { 'muted' }
+			type_label:          if job.run_once { 'once' } else { 'cron' }
+			type_class:          if job.run_once { 'info' } else { 'brand' }
+			has_latest:          has_latest
+			latest_status_label: latest_status_label
+			latest_status_class: latest_status_class
+			latest_exit_code:    latest_exit_code
+			latest_finished_at:  latest_finished_at
+			latest_duration_ms:  latest_duration_ms
+			latest_output:       latest_output
+		}
+	}
+	return views
+}
+
+fn cron_dashboard_execution_card_views(snapshot CronDashboardSnapshot) []CronDashboardExecutionCardView {
+	mut views := []CronDashboardExecutionCardView{}
+	for execution in snapshot.executions {
+		output := utf8_safe_truncate(execution.output.trim_space(), 320)
+		views << CronDashboardExecutionCardView{
+			id:           execution.id
+			job_name:     execution.job_name
+			job_id:       execution.job_id
+			schedule:     execution.schedule
+			command:      execution.command
+			started_at:   format_cron_timestamp(execution.started_at)
+			finished_at:  format_cron_timestamp(execution.finished_at)
+			duration_ms:  execution.duration_ms
+			exit_code:    execution.exit_code
+			output:       output
+			has_output:   output.len > 0
+			status_label: execution_status_label(execution.exit_code)
+			status_class: execution_status_class(execution.exit_code)
+		}
+	}
+	return views
 }
 
 fn ensure_cron_dashboard_db(db_path string) ! {
@@ -264,82 +410,125 @@ fn load_cron_dashboard_snapshot(db_path string, storage_path string) !CronDashbo
 	}
 }
 
-fn dashboard_badge_html(label string, class_name string) string {
-	return '<span class="badge ${class_name}">${html_escape(label)}</span>'
-}
-
-fn dashboard_metric_card_html(title string, value string, note string, accent string) string {
-	return '<article class="metric-card ${accent}"><div class="metric-title">${html_escape(title)}</div><div class="metric-value">${html_escape(value)}</div><div class="metric-note">${html_escape(note)}</div></article>'
-}
-
-fn dashboard_job_card_html(job CronDashboardJobView, latest_execution CronDashboardExecutionView, has_latest bool) string {
-	status_label := if job.enabled { 'enabled' } else { 'disabled' }
-	status_class := if job.enabled { 'success' } else { 'muted' }
-	type_label := if job.run_once { 'once' } else { 'cron' }
-	type_class := if job.run_once { 'info' } else { 'brand' }
-	mut latest_html := ''
-	if has_latest {
-		latest_html = '<div class="job-latest ${execution_status_class(latest_execution.exit_code)}"><div class="job-latest-title">最近执行 · ${html_escape(execution_status_label(latest_execution.exit_code))} · exit ${latest_execution.exit_code}</div><div class="job-latest-meta">完成于 ${html_escape(format_cron_timestamp(latest_execution.finished_at))} · 用时 ${latest_execution.duration_ms}ms</div><pre class="job-output">${html_escape(utf8_safe_truncate(latest_execution.output.trim_space(),
-			240))}</pre></div>'
-	} else {
-		latest_html = '<div class="job-latest muted"><div class="job-latest-title">最近执行</div><div class="job-latest-meta">暂无执行记录</div></div>'
-	}
-	return '<article class="job-card"><div class="job-card-head"><div><h3>${html_escape(job.name)}</h3><div class="badge-row">${dashboard_badge_html(status_label,
-		status_class)}${dashboard_badge_html(type_label, type_class)}</div></div><div class="job-id">${html_escape(job.job_id)}</div></div><div class="job-grid"><div class="job-field"><span>计划</span><strong>${html_escape(job.schedule)}</strong></div><div class="job-field"><span>命令</span><strong>${html_escape(utf8_safe_truncate(job.command,
-		220))}</strong></div><div class="job-field"><span>下次执行</span><strong>${html_escape(format_cron_timestamp(job.next_run))}</strong></div><div class="job-field"><span>上次执行</span><strong>${html_escape(format_cron_timestamp(job.last_run))}</strong></div><div class="job-field"><span>执行次数</span><strong>${job.execution_count}</strong></div><div class="job-field"><span>日志</span><strong>${html_escape(cron_job_log_path(job.job_id))}</strong></div></div>${latest_html}</article>'
-}
-
-fn dashboard_execution_card_html(execution CronDashboardExecutionView) string {
-	status_label := execution_status_label(execution.exit_code)
-	status_class := execution_status_class(execution.exit_code)
-	output := utf8_safe_truncate(execution.output.trim_space(), 320)
-	output_html := if output.len > 0 {
-		'<pre class="job-output">${html_escape(output)}</pre>'
-	} else {
-		'<div class="job-output muted">无输出</div>'
-	}
-	return '<article class="execution-card"><div class="execution-head"><div><strong>${html_escape(execution.job_name)}</strong><div class="execution-meta">${html_escape(execution.job_id)} · ${html_escape(format_cron_timestamp(execution.started_at))} → ${html_escape(format_cron_timestamp(execution.finished_at))}</div></div><div class="badge-row">${dashboard_badge_html(status_label,
-		status_class)}</div></div><div class="execution-stats">${html_escape(execution.schedule)} · ${html_escape(execution.command)} · ${execution.duration_ms}ms</div>${output_html}</article>'
-}
-
 fn build_cron_dashboard_page(snapshot CronDashboardSnapshot, port int) string {
+	metrics := cron_dashboard_metric_views(snapshot)
+	job_cards := cron_dashboard_job_card_views(snapshot)
+	execution_cards := cron_dashboard_execution_card_views(snapshot)
 	mut body := strings.new_builder(65536)
-	body.write_string('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="15"><title>Cron Dashboard</title><style>')
-	body.write_string(':root{--bg:#07111f;--bg2:#0d1930;--panel:rgba(11,20,36,.84);--panel-strong:rgba(9,17,31,.96);--border:rgba(148,163,184,.18);--text:#edf4ff;--muted:#9fb2cc;--accent:#69d2ff;--good:#46d39d;--bad:#ff7a7a;--info:#7aa7ff;--warn:#ffcb6b;--shadow:0 24px 90px rgba(1,6,17,.45);font-synthesis:none}*{box-sizing:border-box}html,body{min-height:100%}body{margin:0;color:var(--text);font-family:"SF Pro Display","PingFang SC","Hiragino Sans GB","Microsoft YaHei UI","Segoe UI",sans-serif;background:radial-gradient(circle at top left,rgba(105,210,255,.22),transparent 28%),radial-gradient(circle at 86% 8%,rgba(70,211,157,.18),transparent 24%),linear-gradient(160deg,var(--bg) 0%,#0a1324 42%,#050812 100%)}body:before{content:"";position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,.028) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.028) 1px,transparent 1px);background-size:48px 48px;mask-image:linear-gradient(180deg,rgba(0,0,0,.95),transparent 85%);pointer-events:none}.shell{max-width:1400px;margin:0 auto;padding:32px 22px 56px;position:relative;z-index:1}.hero{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start;justify-content:space-between;padding:30px 32px;border:1px solid var(--border);border-radius:28px;background:linear-gradient(180deg,rgba(14,26,46,.94),rgba(8,14,27,.86));box-shadow:var(--shadow);backdrop-filter:blur(18px)}.eyebrow{text-transform:uppercase;letter-spacing:.22em;font-size:.74rem;color:var(--accent);margin:0 0 8px}.hero h1{margin:0;font-size:clamp(2.2rem,4vw,4.2rem);line-height:1.02}.hero p{margin:12px 0 0;color:var(--muted);max-width:64ch;line-height:1.65}.hero-meta{display:grid;grid-template-columns:repeat(2,minmax(160px,1fr));gap:12px;min-width:min(100%,420px)}.metric-card{padding:18px 18px 16px;border-radius:22px;background:var(--panel);border:1px solid var(--border);box-shadow:0 12px 30px rgba(1,6,16,.22)}.metric-card.accent{background:linear-gradient(180deg,rgba(20,34,60,.96),rgba(12,20,37,.96))}.metric-title{color:var(--muted);font-size:.85rem;margin-bottom:10px}.metric-value{font-size:1.85rem;font-weight:700;letter-spacing:-.03em}.metric-note{margin-top:8px;color:var(--muted);font-size:.82rem;line-height:1.5}.section{margin-top:26px;padding:24px;border-radius:28px;border:1px solid var(--border);background:linear-gradient(180deg,rgba(10,18,31,.88),rgba(8,13,24,.76));box-shadow:var(--shadow)}.section-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:end;margin-bottom:18px}.section-head h2{margin:0;font-size:1.35rem}.section-head .section-note{color:var(--muted);font-size:.88rem}.job-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}.job-card,.execution-card{border:1px solid var(--border);border-radius:24px;background:var(--panel-strong);padding:18px;box-shadow:0 10px 26px rgba(0,0,0,.22)}.job-card-head,.execution-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.job-card h3{margin:0;font-size:1.2rem}.job-id{color:var(--muted);font-size:.8rem;word-break:break-all;text-align:right}.badge-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.badge{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;font-size:.74rem;font-weight:700;letter-spacing:.02em;text-transform:uppercase}.badge.success{background:rgba(70,211,157,.14);color:var(--good);border:1px solid rgba(70,211,157,.28)}.badge.danger{background:rgba(255,122,122,.14);color:var(--bad);border:1px solid rgba(255,122,122,.28)}.badge.info{background:rgba(122,167,255,.14);color:var(--info);border:1px solid rgba(122,167,255,.28)}.badge.brand{background:rgba(105,210,255,.14);color:var(--accent);border:1px solid rgba(105,210,255,.28)}.badge.muted{background:rgba(148,163,184,.12);color:var(--muted);border:1px solid rgba(148,163,184,.24)}.job-grid,.execution-list{animation:fade-in .45s ease both}@keyframes fade-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}.job-grid{margin-top:16px}.job-field{padding:12px 0;border-top:1px solid rgba(148,163,184,.12)}.job-field:first-child,.job-field:nth-child(2){border-top:0;padding-top:0}.job-field span{display:block;color:var(--muted);font-size:.76rem;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase}.job-field strong{display:block;line-height:1.6;word-break:break-word}.job-latest{margin-top:16px;padding:14px;border-radius:18px;border:1px solid var(--border);background:rgba(8,14,25,.84)}.job-latest.success{border-color:rgba(70,211,157,.24);background:rgba(70,211,157,.08)}.job-latest.danger{border-color:rgba(255,122,122,.24);background:rgba(255,122,122,.08)}.job-latest.muted{background:rgba(148,163,184,.08)}.job-latest-title{font-weight:700;margin-bottom:4px}.job-latest-meta{color:var(--muted);font-size:.84rem;line-height:1.5;margin-bottom:10px}.job-output{margin:0;padding:12px;border-radius:14px;background:rgba(1,6,17,.54);border:1px solid rgba(148,163,184,.14);white-space:pre-wrap;word-break:break-word;color:#d8e6ff;font-family:"SFMono-Regular","Menlo","Monaco","Consolas","Liberation Mono",monospace;font-size:.82rem;line-height:1.55}.job-output.muted{color:var(--muted)}.execution-list{display:grid;grid-template-columns:1fr;gap:14px}.execution-card{padding:18px}.execution-meta,.execution-stats{color:var(--muted);font-size:.84rem;line-height:1.55}.execution-stats{margin:12px 0 10px}.empty-state{padding:28px;border-radius:22px;border:1px dashed rgba(148,163,184,.24);background:rgba(8,14,25,.7);color:var(--muted);line-height:1.7}.footer{margin-top:18px;color:var(--muted);font-size:.82rem;line-height:1.6}.footer code{color:#e6f2ff;background:rgba(148,163,184,.12);padding:2px 6px;border-radius:6px}</style></head><body><main class="shell"><section class="hero"><div><p class="eyebrow">MiniMax Cron Dashboard</p><h1>静态任务与执行视图</h1><p>本地页面通过 veb 提供服务，数据从 SQLite 读取，cron 任务和最近执行结果会自动刷新。页面默认每 15 秒重载一次，便于在后台观察任务状态变化。</p></div><div class="hero-meta">')
-	body.write_string(dashboard_metric_card_html('任务总数', snapshot.total_jobs.str(),
-		'运行中与已停用任务的总和', 'accent'))
-	body.write_string(dashboard_metric_card_html('已启用', snapshot.enabled_jobs.str(),
-		'还能继续按计划触发的任务', 'accent'))
-	body.write_string(dashboard_metric_card_html('执行记录', snapshot.total_executions.str(),
-		'最近 20 条执行历史', 'accent'))
-	body.write_string(dashboard_metric_card_html('失败记录', snapshot.failed_executions.str(),
-		'exit code 非 0 的执行', 'accent'))
-	body.write_string('</div></section><section class="section"><div class="section-head"><div><h2>Cron 任务</h2><div class="section-note">存储目录：<code>${html_escape(snapshot.storage_path)}</code></div></div><div class="section-note">SQLite：<code>${html_escape(snapshot.db_path)}</code> · 端口 <code>${port}</code></div></div>')
-	if snapshot.jobs.len == 0 {
-		body.write_string('<div class="empty-state">当前没有 Cron 任务。可以先运行 <code>minimax_cli cron add ...</code> 或 <code>minimax_cli cron delay ...</code> 创建任务。</div>')
+	body.write_string('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Cron Dashboard</title><style>body{margin:0;padding:32px;font-family:"SF Pro Display","PingFang SC","Hiragino Sans GB","Microsoft YaHei UI",sans-serif;background:#07111f;color:#edf4ff}main{max-width:1440px;margin:0 auto}section{margin:24px 0;padding:20px;border:1px solid rgba(148,163,184,.18);border-radius:24px;background:rgba(10,18,31,.88)}.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.card{border:1px solid rgba(148,163,184,.18);border-radius:20px;padding:16px;background:rgba(9,17,31,.96)}.badge{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px}.success{color:#46d39d}.danger{color:#ff7a7a}.muted{color:#9fb2cc}.output{white-space:pre-wrap;word-break:break-word;background:rgba(1,6,17,.54);padding:10px;border-radius:12px;border:1px solid rgba(148,163,184,.14)}</style></head><body><main>')
+	body.write_string(
+		'<section><p style="text-transform:uppercase;letter-spacing:.22em;color:#69d2ff;font-size:.74rem;margin:0 0 8px">MiniMax Cron Dashboard</p><h1 style="margin:0;font-size:clamp(2rem,4vw,4rem)">静态任务与执行视图</h1><p style="color:#9fb2cc">本地页面通过 veb 提供服务，数据从 SQLite 读取，cron 任务和最近执行结果会自动刷新。</p><p style="color:#9fb2cc">生成于 <code>' +
+		html_escape(format_cron_timestamp(snapshot.generated_at)) +
+		'</code></p><div class="metrics">')
+	for metric in metrics {
+		body.write_string('<div class="card"><div style="color:#9fb2cc;font-size:.85rem">' +
+			html_escape(metric.title) + '</div><div style="font-size:1.75rem;font-weight:700">' +
+			html_escape(metric.value) + '</div><div style="color:#9fb2cc;font-size:.82rem">' +
+			html_escape(metric.note) + '</div></div>')
+	}
+	body.write_string('</div></section>')
+	body.write_string(
+		'<section><h2>Cron 任务</h2><div style="color:#9fb2cc">存储目录：<code>' +
+		html_escape(snapshot.storage_path) + '</code> · SQLite：<code>' +
+		html_escape(snapshot.db_path) + '</code> · 端口 <code>' + port.str() + '</code></div>')
+	if job_cards.len == 0 {
+		body.write_string('<div class="card muted">当前没有 Cron 任务。可以先运行 <code>minimax_cli cron add ...</code> 或 <code>minimax_cli cron delay ...</code> 创建任务。</div>')
 	} else {
-		body.write_string('<div class="job-grid">')
-		for job in snapshot.jobs {
-			if exec := latest_execution_for_job(snapshot.executions, job.job_id) {
-				body.write_string(dashboard_job_card_html(job, exec, true))
+		body.write_string('<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-top:16px">')
+		for job in job_cards {
+			body.write_string(
+				'<article class="card"><div style="display:flex;justify-content:space-between;gap:12px"><div><h3 style="margin:0">' +
+				html_escape(job.name) + '</h3><div>')
+			body.write_string('<span class="badge ' + job.status_class + '">' +
+				html_escape(job.status_label) + '</span> ')
+			body.write_string('<span class="badge ' + job.type_class + '">' +
+				html_escape(job.type_label) +
+				'</span></div></div><div style="color:#9fb2cc;word-break:break-all;text-align:right">' +
+				html_escape(job.job_id) + '</div></div>')
+			body.write_string('<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:0 16px;margin-top:16px">')
+			body.write_string(
+				'<div><div style="color:#9fb2cc;font-size:.76rem">计划</div><strong>' +
+				html_escape(job.schedule) + '</strong></div>')
+			body.write_string(
+				'<div><div style="color:#9fb2cc;font-size:.76rem">命令</div><strong>' +
+				html_escape(job.command) + '</strong></div>')
+			body.write_string(
+				'<div><div style="color:#9fb2cc;font-size:.76rem">下次执行</div><strong>' +
+				html_escape(job.next_run) + '</strong></div>')
+			body.write_string(
+				'<div><div style="color:#9fb2cc;font-size:.76rem">上次执行</div><strong>' +
+				html_escape(job.last_run) + '</strong></div>')
+			body.write_string(
+				'<div><div style="color:#9fb2cc;font-size:.76rem">执行次数</div><strong>' +
+				job.execution_count.str() + '</strong></div>')
+			body.write_string(
+				'<div><div style="color:#9fb2cc;font-size:.76rem">日志</div><strong>' +
+				html_escape(job.log_path) + '</strong></div>')
+			body.write_string('</div>')
+			if job.has_latest {
+				body.write_string('<div class="card ' + job.latest_status_class +
+					'" style="margin-top:16px"><div style="font-weight:700">最近执行 · ' +
+					html_escape(job.latest_status_label) + ' · exit ' +
+					job.latest_exit_code.str() +
+					'</div><div style="color:#9fb2cc;font-size:.84rem">完成于 ' +
+					html_escape(job.latest_finished_at) + ' · 用时 ' +
+					job.latest_duration_ms.str() + ' ms</div>')
+				if job.latest_output.len > 0 {
+					body.write_string('<pre class="output">' + html_escape(job.latest_output) +
+						'</pre>')
+				} else {
+					body.write_string('<div class="output muted">无输出</div>')
+				}
+				body.write_string('</div>')
 			} else {
-				body.write_string(dashboard_job_card_html(job, CronDashboardExecutionView{},
-					false))
+				body.write_string('<div class="card muted" style="margin-top:16px">最近执行：暂无执行记录</div>')
 			}
+			body.write_string('</article>')
 		}
 		body.write_string('</div>')
 	}
-	body.write_string('</section><section class="section"><div class="section-head"><div><h2>最近执行</h2><div class="section-note">按开始时间倒序展示，最多 20 条</div></div></div>')
-	if snapshot.executions.len == 0 {
-		body.write_string('<div class="empty-state">当前还没有执行历史。Cron 任务首次运行后，这里会出现详细记录。</div>')
+	body.write_string('</section>')
+	body.write_string('<section><h2>最近执行</h2><div style="color:#9fb2cc">按开始时间倒序展示，最多 20 条</div>')
+	if execution_cards.len == 0 {
+		body.write_string('<div class="card muted">当前还没有执行历史。Cron 任务首次运行后，这里会出现详细记录。</div>')
 	} else {
-		body.write_string('<div class="execution-list">')
-		for execution in snapshot.executions {
-			body.write_string(dashboard_execution_card_html(execution))
+		body.write_string('<div style="display:grid;gap:14px;margin-top:16px">')
+		for execution in execution_cards {
+			body.write_string(
+				'<article class="card"><div style="display:flex;justify-content:space-between;gap:12px"><div><strong>' +
+				html_escape(execution.job_name) + '</strong><div style="color:#9fb2cc">' +
+				html_escape(execution.job_id) + ' · ' + html_escape(execution.started_at) +
+				' → ' + html_escape(execution.finished_at) +
+				'</div></div><div><span class="badge ' + execution.status_class + '">' +
+				html_escape(execution.status_label) + '</span></div></div>')
+			body.write_string('<div style="color:#9fb2cc;margin:12px 0 10px">' +
+				html_escape(execution.schedule) + ' · ' + html_escape(execution.command) + ' · ' +
+				execution.duration_ms.str() + ' ms</div>')
+			if execution.has_output {
+				body.write_string('<pre class="output">' + html_escape(execution.output) + '</pre>')
+			} else {
+				body.write_string('<div class="output muted">无输出</div>')
+			}
+			body.write_string('</article>')
 		}
 		body.write_string('</div>')
 	}
-	body.write_string('</section><div class="footer">页面由 <code>veb</code> 提供，数据由 <code>sqlite3</code> CLI 写入 <code>${html_escape(snapshot.db_path)}</code>。你可以用 <code>minimax_cli cron list</code>、<code>minimax_cli cron stats</code>、<code>minimax_cli cron tick</code> 和 <code>minimax_cli cron dashboard</code> 持续观察变化。</div></main></body></html>')
+	body.write_string('</section>')
+	body.write_string(
+		'<section><div style="color:#9fb2cc">页面由 <code>veb</code> 提供，数据由 <code>sqlite3</code> CLI 写入 <code>' +
+		html_escape(snapshot.db_path) +
+		'</code>。你可以用 <code>minimax_cli cron list</code>、<code>minimax_cli cron stats</code>、<code>minimax_cli cron tick</code> 和 <code>minimax_cli cron dashboard</code> 持续观察变化。</div></section>')
+	body.write_string('</main></body></html>')
+	return body.str()
+}
+
+fn build_cron_dashboard_error_page(error_message string, db_path string) string {
+	mut body := strings.new_builder(4096)
+	body.write_string(
+		'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Cron Dashboard</title></head><body><main style="max-width:960px;margin:0 auto;padding:32px;font-family:sans-serif;background:#08111f;color:#eef4ff"><h1>Cron Dashboard 无法加载</h1><p>' +
+		html_escape(error_message) +
+		'</p><p>请确认 <code>sqlite3</code> 可用且数据库目录可写：<code>' +
+		html_escape(db_path) + '</code></p></main></body></html>')
 	return body.str()
 }
 
@@ -365,7 +554,21 @@ fn start_cron_dashboard_server(port int) ! {
 pub fn (app &CronDashboardApp) index(mut ctx CronDashboardContext) veb.Result {
 	snapshot := load_cron_dashboard_snapshot(app.db_path, app.storage_path) or {
 		ctx.res.set_status(.internal_server_error)
-		return ctx.html('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Cron Dashboard</title><style>body{margin:0;padding:32px;font-family:"SF Pro Display","PingFang SC","Hiragino Sans GB","Microsoft YaHei UI",sans-serif;background:#08111f;color:#eef4ff}main{max-width:960px;margin:0 auto;padding:28px;border:1px solid rgba(148,163,184,.22);border-radius:24px;background:rgba(9,16,30,.94)}code{background:rgba(148,163,184,.12);padding:2px 6px;border-radius:6px}</style></head><body><main><h1>Cron Dashboard 无法加载</h1><p>${html_escape(err.msg())}</p><p>请确认 <code>sqlite3</code> 可用且数据库目录可写：<code>${html_escape(app.db_path)}</code></p></main></body></html>')
+		return ctx.html(build_cron_dashboard_error_page(err.msg(), app.db_path))
 	}
-	return ctx.html(build_cron_dashboard_page(snapshot, app.port))
+	title := 'Cron Dashboard'
+	subtitle := '本地页面通过 veb 提供服务，数据从 SQLite 读取，cron 任务和最近执行结果会自动刷新。'
+	refresh_seconds := 15
+	port := app.port
+	storage_path := snapshot.storage_path
+	db_path := snapshot.db_path
+	metrics := cron_dashboard_metric_views(snapshot)
+	job_cards := cron_dashboard_job_card_views(snapshot)
+	execution_cards := cron_dashboard_execution_card_views(snapshot)
+	has_jobs := job_cards.len > 0
+	has_executions := execution_cards.len > 0
+	job_empty_state := '当前没有 Cron 任务。可以先运行 minimax_cli cron add ... 或 minimax_cli cron delay ... 创建任务。'
+	execution_empty_state := '当前还没有执行历史。Cron 任务首次运行后，这里会出现详细记录。'
+	generated_at := format_cron_timestamp(snapshot.generated_at)
+	return $veb.html('templates/page.html')
 }

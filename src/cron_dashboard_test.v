@@ -108,8 +108,20 @@ fn test_build_cron_dashboard_page_escapes_dynamic_content() {
 	}
 	page := build_cron_dashboard_page(snapshot, 8787)
 	assert page.contains('Cron Dashboard')
+	assert page.contains('静态任务与执行视图')
+	assert page.contains('任务总数')
+	assert page.contains('最近执行')
+	assert page.contains('生成于')
 	assert page.contains('dashboard &lt;job&gt;')
 	assert page.contains('echo &quot;&lt;html&gt;&quot;')
 	assert page.contains('line &lt;one&gt;')
 	assert page.contains('SQLite')
+	assert page.contains('minimax_cli cron dashboard')
+}
+
+fn test_render_cron_dashboard_error_page_escapes_dynamic_content() {
+	page := build_cron_dashboard_error_page('sqlite <down>', '/tmp/cron-dashboard.sqlite')
+	assert page.contains('Cron Dashboard 无法加载')
+	assert page.contains('sqlite &lt;down&gt;')
+	assert page.contains('/tmp/cron-dashboard.sqlite')
 }
