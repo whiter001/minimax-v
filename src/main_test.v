@@ -127,6 +127,7 @@ fn test_runtime_scan_does_not_demote_interactive_when_i_has_prompt() {
 				}
 			}
 		}
+
 		k++
 	}
 	assert prompt == '1+1=?'

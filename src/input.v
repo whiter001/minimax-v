@@ -107,6 +107,7 @@ fn handle_macos_escape_sequence(mut buffer []rune, cursor int, prompt string) in
 		}
 		else {}
 	}
+
 	return next_cursor
 }
 

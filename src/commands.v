@@ -83,14 +83,13 @@ fn load_command_registry(workspace string) CommandRegistry {
 
 	load_custom_commands_from_dir(get_user_commands_dir(), 'user', '', mut registry)
 	if workspace.len > 0 {
-		load_custom_commands_from_dir(os.join_path(workspace, '.minimax', 'commands'),
-			'project', '', mut registry)
+		load_custom_commands_from_dir(os.join_path(workspace, '.minimax', 'commands'), 'project',
+			'', mut registry)
 	}
 
 	for ext in discover_extensions() {
 		if ext.enabled && os.is_dir(ext.commands_dir) {
-			load_custom_commands_from_dir(ext.commands_dir, 'extension', ext.name, mut
-				registry)
+			load_custom_commands_from_dir(ext.commands_dir, 'extension', ext.name, mut registry)
 		}
 	}
 
@@ -128,8 +127,7 @@ fn command_name_exists(commands []CustomCommand, name string) bool {
 
 fn sanitize_extension_name(name string) string {
 	mut sanitized := name.trim_space()
-	sanitized = sanitized.replace(' ', '-').replace(':', '-').replace('/', '-').replace('\\',
-		'-')
+	sanitized = sanitized.replace(' ', '-').replace(':', '-').replace('/', '-').replace('\\', '-')
 	if sanitized.len == 0 {
 		return 'extension'
 	}
@@ -217,8 +215,8 @@ fn load_custom_commands_from_dir(dir string, source string, extension_name strin
 		}
 		if source == 'extension' && extension_name.len > 0
 			&& command_name_exists(registry.commands, name) {
-			name = ensure_unique_command_name(registry.commands, build_extension_prefixed_name(extension_name,
-				name))
+			name = ensure_unique_command_name(registry.commands,
+				build_extension_prefixed_name(extension_name, name))
 		}
 		if cmd := parse_command_toml(path, name, source, extension_name) {
 			add_or_override_custom_command(mut registry, cmd)
@@ -287,8 +285,7 @@ fn extract_toml_single_line_string(content string, key string) string {
 		raw := trimmed[eq_idx + 1..].trim_space()
 		if raw.starts_with('"') {
 			if end_idx := find_unescaped_quote(raw, 1, `"`) {
-				return raw[1..end_idx].replace('\\"', '"').replace('\\n', '\n').replace('\\t',
-					'\t')
+				return raw[1..end_idx].replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
 			}
 		} else if raw.starts_with("'") {
 			if end_idx := find_unescaped_quote(raw, 1, `'`) {
@@ -1000,8 +997,8 @@ fn add_extension_mcp_servers(mut manager McpManager) int {
 	}
 	mut added := 0
 	for ext_server in servers {
-		server_name := reserve_unique_mcp_server_name(ext_server.extension_name, ext_server.config.name, mut
-			used)
+		server_name := reserve_unique_mcp_server_name(ext_server.extension_name,
+			ext_server.config.name, mut used)
 		manager.add_server(server_name, ext_server.config.command, ext_server.config.args,
 			ext_server.config.env)
 		added++

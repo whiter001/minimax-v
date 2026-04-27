@@ -167,8 +167,8 @@ fn test_execute_tool_use_read_file() {
 			'path': test_path
 		}
 	}
-	result := execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(),
-		false, false, unsafe { nil })
+	result := execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(), false,
+		false, unsafe { nil })
 	assert result == 'exec test'
 }
 
@@ -214,8 +214,8 @@ fn test_execute_tool_use_record_experience() {
 			'confidence': '5'
 		}
 	}
-	result := execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(),
-		false, false, unsafe { nil })
+	result := execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(), false,
+		false, unsafe { nil })
 	assert result.contains('已记录经验')
 	assert result.contains('已同步 skill')
 	assert result.contains('已升级 SOP')
@@ -227,16 +227,14 @@ fn test_execute_tool_use_record_experience() {
 }
 
 fn test_send_mail_tool_validates_required_smtp_fields() {
-	result := send_mail_tool(Config{}, '', 0, '', '', '', 'to@example.com', 'subject',
-		'body')
+	result := send_mail_tool(Config{}, '', 0, '', '', '', 'to@example.com', 'subject', 'body')
 	assert result.contains('smtp server is required')
 
 	config := Config{
 		smtp_server: 'smtp.example.com'
 		smtp_port:   587
 	}
-	result2 := send_mail_tool(config, '', 0, '', '', '', 'to@example.com', 'subject',
-		'body')
+	result2 := send_mail_tool(config, '', 0, '', '', '', 'to@example.com', 'subject', 'body')
 	assert result2.contains('smtp username is required')
 
 	config2 := Config{
@@ -246,8 +244,7 @@ fn test_send_mail_tool_validates_required_smtp_fields() {
 		smtp_password: 'secret'
 		smtp_from:     'sender@example.com'
 	}
-	result3 := send_mail_tool(config2, '', 0, '', '', '', 'to@example.com', 'sub\rject',
-		'body')
+	result3 := send_mail_tool(config2, '', 0, '', '', '', 'to@example.com', 'sub\rject', 'body')
 	assert result3.contains('CR/LF')
 }
 
@@ -704,14 +701,16 @@ fn test_handle_builtin_command_with_client_shows_speech_help() {
 
 fn test_handle_builtin_command_with_client_supports_split_usage() {
 	mut client := new_api_client(default_config())
-	result := handle_builtin_command_with_client(mut client, 'speech --split --text abcdefghijklmnopqrstuvwxyz')
+	result := handle_builtin_command_with_client(mut client,
+		'speech --split --text abcdefghijklmnopqrstuvwxyz')
 	assert result.contains('speech synthesis requires an API key')
 		|| result.contains('Error: speech synthesis requires an API key')
 }
 
 fn test_handle_builtin_command_with_client_shows_speech_usage_on_missing_text_file() {
 	mut client := new_api_client(default_config())
-	result := handle_builtin_command_with_client(mut client, 'speech --split --text-file /tmp/__minimax_missing_speech_input__.txt')
+	result := handle_builtin_command_with_client(mut client,
+		'speech --split --text-file /tmp/__minimax_missing_speech_input__.txt')
 	assert result.contains('用法: speech')
 	assert result.contains('提示: 输入 speech --help')
 }
@@ -726,7 +725,8 @@ fn test_handle_builtin_command_with_client_shows_speech_usage_on_empty_split_tex
 	assert written == '   \n\t'
 	defer { os.rm(test_path) or {} }
 	mut client := new_api_client(default_config())
-	result := handle_builtin_command_with_client(mut client, 'speech --split --text-file ${test_path}')
+	result := handle_builtin_command_with_client(mut client,
+		'speech --split --text-file ${test_path}')
 	assert result.contains('用法: speech')
 	assert result.contains('text is required')
 }
@@ -785,8 +785,8 @@ fn test_execute_tool_use_list_files_requires_api_key() {
 			'purpose': 't2a_async_input'
 		}
 	}
-	result := execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(),
-		false, false, unsafe { nil })
+	result := execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(), false,
+		false, unsafe { nil })
 	assert result.contains('file management requires an API key')
 }
 
@@ -954,8 +954,7 @@ fn test_todo_manager_clear() {
 
 fn test_todo_manager_set_from_text() {
 	todo_manager_tool('clear', '', 0, '', '')
-	result := todo_manager_tool('set', '', 0, '1. Setup env\n2. Write code\n3. Test',
-		'')
+	result := todo_manager_tool('set', '', 0, '1. Setup env\n2. Write code\n3. Test', '')
 	assert !result.starts_with('Error')
 
 	list := todo_manager_tool('list', '', 0, '', '')
@@ -1188,8 +1187,7 @@ fn test_build_macos_screencapture_command_region() {
 }
 
 fn test_build_macos_sips_resize_command() {
-	cmd := build_macos_sips_resize_command('/tmp/input image.png', '/tmp/output image.png',
-		1600)
+	cmd := build_macos_sips_resize_command('/tmp/input image.png', '/tmp/output image.png', 1600)
 	assert cmd == "sips -Z 1600 '/tmp/input image.png' --out '/tmp/output image.png'"
 }
 

@@ -575,7 +575,7 @@ fn (scheduler CronScheduler) get_stats() map[string]int {
 	}
 }
 
-fn (scheduler CronScheduler) list_jobs() []CronJob {
+fn (scheduler CronScheduler) list_jobs() []main.CronJob {
 	mut jobs := []CronJob{}
 	for _, j in scheduler.jobs {
 		jobs << j

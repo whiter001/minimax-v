@@ -83,7 +83,8 @@ fn (mut s AcpServer) handle_request(line string) string {
 			params := parse_json_string_object(params_raw)
 			message := params['message'] or { '' }
 			if message.len > 0 {
-				return build_acp_error(id_raw, -32601, 'sampling not implemented: streaming not supported in stdio mode')
+				return build_acp_error(id_raw, -32601,
+					'sampling not implemented: streaming not supported in stdio mode')
 			}
 			return build_acp_error(id_raw, -32601, 'sampling not implemented')
 		}

@@ -131,14 +131,8 @@ fn sqlite_exec(db_path string, statement string) !string {
 }
 
 fn ensure_experience_db(db_path string) ! {
-	statement := 'CREATE TABLE IF NOT EXISTS experiences (' +
-		'id INTEGER PRIMARY KEY AUTOINCREMENT,' + 'skill_name TEXT NOT NULL,' +
-		'title TEXT NOT NULL,' + "scenario TEXT DEFAULT ''," + "action_taken TEXT DEFAULT ''," +
-		"outcome TEXT DEFAULT ''," + "tags TEXT DEFAULT ''," + 'confidence INTEGER DEFAULT 3,' +
-		"source TEXT DEFAULT 'manual'," + 'created_at INTEGER NOT NULL,' +
-		'updated_at INTEGER NOT NULL' + ');' +
-		'CREATE INDEX IF NOT EXISTS idx_experiences_skill_name ON experiences(skill_name);' +
-		'CREATE INDEX IF NOT EXISTS idx_experiences_created_at ON experiences(created_at DESC);'
+	statement :=
+		'CREATE TABLE IF NOT EXISTS experiences (' + 'id INTEGER PRIMARY KEY AUTOINCREMENT,' + 'skill_name TEXT NOT NULL,' + 'title TEXT NOT NULL,' + "scenario TEXT DEFAULT ''," + "action_taken TEXT DEFAULT ''," + "outcome TEXT DEFAULT ''," + "tags TEXT DEFAULT ''," + 'confidence INTEGER DEFAULT 3,' + "source TEXT DEFAULT 'manual'," + 'created_at INTEGER NOT NULL,' + 'updated_at INTEGER NOT NULL' + ');' + 'CREATE INDEX IF NOT EXISTS idx_experiences_skill_name ON experiences(skill_name);' + 'CREATE INDEX IF NOT EXISTS idx_experiences_created_at ON experiences(created_at DESC);'
 	_ = sqlite_exec(db_path, statement)!
 }
 
@@ -227,15 +221,16 @@ fn collect_experience_wizard_record(mut prompter ExperienceWizardPrompter) !Expe
 		return error('已取消')
 	}
 	confidence := if confidence_text.len > 0 { confidence_text.int() } else { 3 }
-	return build_experience_record(skill_name, title, scenario, action_taken, outcome,
-		tags, confidence, 'wizard')
+	return build_experience_record(skill_name, title, scenario, action_taken, outcome, tags,
+		confidence, 'wizard')
 }
 
 fn record_experience_automated(skill_name string, title string, scenario string, action string, outcome string, tags string, confidence int) string {
-	mut record := build_experience_record(skill_name, title, scenario, action, outcome,
-		tags, confidence, 'auto') or { return 'Error: ${err.msg()}' }
+	mut record := build_experience_record(skill_name, title, scenario, action, outcome, tags,
+		confidence, 'auto') or { return 'Error: ${err.msg()}' }
 	return store_experience_record_with_paths_and_automation(mut record, get_experience_db_path(),
-		get_experience_jsonl_path(), get_experience_markdown_dir(), load_experience_automation_settings())
+		get_experience_jsonl_path(), get_experience_markdown_dir(),
+		load_experience_automation_settings())
 }
 
 fn append_experience_automation_results(mut lines []string, record ExperienceRecord, settings ExperienceAutomationSettings, jsonl_path string) {
@@ -306,8 +301,9 @@ fn experience_add_wizard_with_scripted_inputs(inputs []string, db_path string, j
 }
 
 fn experience_add_wizard() string {
-	return experience_add_wizard_with_paths_and_automation(get_experience_db_path(), get_experience_jsonl_path(),
-		get_experience_markdown_dir(), load_experience_automation_settings())
+	return experience_add_wizard_with_paths_and_automation(get_experience_db_path(),
+		get_experience_jsonl_path(), get_experience_markdown_dir(),
+		load_experience_automation_settings())
 }
 
 fn normalize_experience_sync_mode(mode string) string {
@@ -365,8 +361,9 @@ fn parse_experience_kv_payload(payload string) !ExperienceRecord {
 	confidence := (values['confidence'] or { values['c'] or { '3' } }).trim_space().int()
 	return build_experience_record(values['skill'] or { values['s'] or { '' } }, values['title'] or {
 		values['t'] or { '' }
-	}, values['scenario'] or { '' }, values['action'] or { '' }, values['outcome'] or { '' },
-		values['tags'] or { '' }, confidence, values['source'] or { '' })
+	}, values['scenario'] or { '' }, values['action'] or { '' }, values['outcome'] or { '' }, values['tags'] or {
+		''
+	}, confidence, values['source'] or { '' })
 }
 
 fn parse_experience_pipe_payload(payload string) !ExperienceRecord {
@@ -381,8 +378,8 @@ fn parse_experience_pipe_payload(payload string) !ExperienceRecord {
 	outcome := if parts.len > 4 { parts[4] } else { '' }
 	tags := if parts.len > 5 { parts[5] } else { '' }
 	confidence := if parts.len > 6 { parts[6].int() } else { 3 }
-	return build_experience_record(skill_name, title, scenario, action_taken, outcome,
-		tags, confidence, 'manual')
+	return build_experience_record(skill_name, title, scenario, action_taken, outcome, tags,
+		confidence, 'manual')
 }
 
 fn parse_experience_json(payload string) !ExperienceRecord {
@@ -391,8 +388,8 @@ fn parse_experience_json(payload string) !ExperienceRecord {
 		return error('experience add 需要 JSON 对象，例如: experience add {"skill":"demo","title":"..."}')
 	}
 	return build_experience_record(decode_json_field(trimmed, 'skill'), decode_json_field(trimmed,
-		'title'), decode_json_field(trimmed, 'scenario'), decode_json_field(trimmed, 'action'),
-		decode_json_field(trimmed, 'outcome'), decode_json_field(trimmed, 'tags'), int(extract_json_number_value(trimmed,
+		'title'), decode_json_field(trimmed, 'scenario'), decode_json_field(trimmed, 'action'), decode_json_field(trimmed,
+		'outcome'), decode_json_field(trimmed, 'tags'), int(extract_json_number_value(trimmed,
 		'confidence')), decode_json_field(trimmed, 'source'))
 }
 
@@ -508,11 +505,10 @@ fn insert_experience_sqlite(record ExperienceRecord, db_path string) !int {
 	}
 	ensure_experience_db(db_path)!
 	statement :=
-		'INSERT INTO experiences (skill_name, title, scenario, action_taken, outcome, tags, confidence, source, created_at, updated_at) VALUES (' +
-		sql_quote(record.skill_name) + ', ' + sql_quote(record.title) + ', ' +
-		sql_quote(record.scenario) + ', ' + sql_quote(record.action_taken) + ', ' +
-		sql_quote(record.outcome) + ', ' + sql_quote(record.tags) + ', ' +
-		'${record.confidence}, ' + sql_quote(record.source) +
+		'INSERT INTO experiences (skill_name, title, scenario, action_taken, outcome, tags, confidence, source, created_at, updated_at) VALUES (' + sql_quote(record.skill_name) +
+		', ' + sql_quote(record.title) + ', ' + sql_quote(record.scenario) + ', ' +
+		sql_quote(record.action_taken) + ', ' + sql_quote(record.outcome) + ', ' +
+		sql_quote(record.tags) + ', ' + '${record.confidence}, ' + sql_quote(record.source) +
 		', ${record.created_at}, ${record.updated_at}) RETURNING id;'
 	output := sqlite_exec(db_path, statement)!
 	return output.trim_space().int()
@@ -531,7 +527,8 @@ fn record_experience_payload_with_paths(payload string, db_path string, jsonl_pa
 
 fn record_experience_payload(payload string) string {
 	return record_experience_payload_with_paths_and_automation(payload, get_experience_db_path(),
-		get_experience_jsonl_path(), get_experience_markdown_dir(), load_experience_automation_settings())
+		get_experience_jsonl_path(), get_experience_markdown_dir(),
+		load_experience_automation_settings())
 }
 
 fn record_experience_from_tool_input_with_paths(input map[string]string, db_path string, jsonl_path string, markdown_dir string, settings ExperienceAutomationSettings) string {
@@ -542,18 +539,19 @@ fn record_experience_from_tool_input_with_paths(input map[string]string, db_path
 	}
 	confidence_text := (input['confidence'] or { '3' }).trim_space()
 	confidence := if confidence_text.len > 0 { confidence_text.int() } else { 3 }
-	mut record := build_experience_record(input['skill'] or { '' }, input['title'] or { '' },
-		input['scenario'] or { '' }, input['action'] or { input['action_taken'] or { '' } },
-		input['outcome'] or { '' }, input['tags'] or { '' }, confidence, input['source'] or {
-		'tool'
-	}) or { return 'Error: ${err.msg()}' }
+	mut record := build_experience_record(input['skill'] or { '' }, input['title'] or { '' }, input['scenario'] or {
+		''
+	}, input['action'] or { input['action_taken'] or { '' } }, input['outcome'] or { '' }, input['tags'] or {
+		''
+	}, confidence, input['source'] or { 'tool' }) or { return 'Error: ${err.msg()}' }
 	return store_experience_record_with_paths_and_automation(mut record, db_path, jsonl_path,
 		markdown_dir, settings)
 }
 
 fn record_experience_from_tool_input(input map[string]string) string {
 	return record_experience_from_tool_input_with_paths(input, get_experience_db_path(),
-		get_experience_jsonl_path(), get_experience_markdown_dir(), load_experience_automation_settings())
+		get_experience_jsonl_path(), get_experience_markdown_dir(),
+		load_experience_automation_settings())
 }
 
 fn load_experience_records_from_jsonl(jsonl_path string) []ExperienceRecord {
@@ -593,8 +591,7 @@ fn filter_experience_records(records []ExperienceRecord, skill_filter string) []
 }
 
 fn experience_list_text_with_paths(arg string, jsonl_path string) string {
-	records := filter_experience_records(load_experience_records_from_jsonl(jsonl_path),
-		arg)
+	records := filter_experience_records(load_experience_records_from_jsonl(jsonl_path), arg)
 	if records.len == 0 {
 		return '暂无经验记录'
 	}
@@ -746,7 +743,8 @@ fn delete_experience_from_sqlite(target string, result_tag string, db_path strin
 	if result_tag.starts_with('skill:') {
 		parts := result_tag.split(':')
 		if parts.len >= 2 {
-			_ = sqlite_exec(db_path, 'DELETE FROM experiences WHERE skill_name = ${sql_quote(parts[1])};') or {
+			_ = sqlite_exec(db_path,
+				'DELETE FROM experiences WHERE skill_name = ${sql_quote(parts[1])};') or {
 				return ''
 			}
 			return 'SQLite 已按 skill 删除'
@@ -782,8 +780,8 @@ fn experience_prune_text_with_paths(target string, db_path string, jsonl_path st
 }
 
 fn experience_prune_text(target string) string {
-	return experience_prune_text_with_paths(target, get_experience_db_path(), get_experience_jsonl_path(),
-		get_experience_markdown_dir())
+	return experience_prune_text_with_paths(target, get_experience_db_path(),
+		get_experience_jsonl_path(), get_experience_markdown_dir())
 }
 
 fn compact_experience_text(text string, max_len int) string {
@@ -801,7 +799,8 @@ fn search_experience_records_jsonl(query string, jsonl_path string) []Experience
 	}
 	mut matches := []ExperienceRecord{}
 	for record in load_experience_records_from_jsonl(jsonl_path) {
-		searchable := '${record.skill_name}\n${record.title}\n${record.scenario}\n${record.action_taken}\n${record.outcome}\n${record.tags}'.to_lower()
+		searchable :=
+			'${record.skill_name}\n${record.title}\n${record.scenario}\n${record.action_taken}\n${record.outcome}\n${record.tags}'.to_lower()
 		if searchable.contains(needle) {
 			matches << record
 			if matches.len >= 20 {
@@ -843,7 +842,8 @@ fn experience_search_text_with_paths(query string, db_path string, jsonl_path st
 }
 
 fn experience_search_text(query string) string {
-	return experience_search_text_with_paths(query, get_experience_db_path(), get_experience_jsonl_path())
+	return experience_search_text_with_paths(query, get_experience_db_path(),
+		get_experience_jsonl_path())
 }
 
 fn records_for_skill(skill_name string, jsonl_path string) []ExperienceRecord {
@@ -860,7 +860,8 @@ fn records_for_skill(skill_name string, jsonl_path string) []ExperienceRecord {
 }
 
 fn looks_like_failure(record ExperienceRecord) bool {
-	text := '${record.title}\n${record.scenario}\n${record.action_taken}\n${record.outcome}'.to_lower()
+	text :=
+		'${record.title}\n${record.scenario}\n${record.action_taken}\n${record.outcome}'.to_lower()
 	markers := ['失败', '错误', '报错', '阻止', 'not allowed', 'denied', 'timeout', '无效',
 		'回退', 'fallback', '手动上传', '手动处理']
 	for marker in markers {
@@ -916,6 +917,7 @@ fn top_unique_items(records []ExperienceRecord, kind string, limit int) []string
 			}
 			else {}
 		}
+
 		if items.len >= limit {
 			break
 		}
@@ -993,6 +995,7 @@ fn build_skill_generated_block(skill_name string, records []ExperienceRecord, mo
 			experience_sync_mode_strict { 4 }
 			else { max_skill_sync_rules }
 		}
+
 		for idx, record in preferred {
 			if idx >= rule_limit {
 				break
@@ -1010,6 +1013,7 @@ fn build_skill_generated_block(skill_name string, records []ExperienceRecord, mo
 			experience_sync_mode_strict { 4 }
 			else { max_skill_sync_rules }
 		}
+
 		for idx, record in fallbacks {
 			if idx >= rule_limit {
 				break
@@ -1079,6 +1083,7 @@ fn build_primary_sop_steps(records []ExperienceRecord, mode string) []string {
 		experience_sync_mode_strict { 4 }
 		else { 5 }
 	}
+
 	mut steps := []string{}
 	for record in records {
 		if !should_include_in_sync_mode(record, resolved_mode) || !looks_like_success(record) {
@@ -1112,6 +1117,7 @@ fn build_fallback_sop_items(records []ExperienceRecord, mode string) []string {
 		experience_sync_mode_strict { 4 }
 		else { 4 }
 	}
+
 	mut items := []string{}
 	for record in records {
 		if !should_include_in_sync_mode(record, resolved_mode) || !looks_like_failure(record) {
@@ -1318,8 +1324,7 @@ fn sync_sop_from_knowledge_with_paths(skill_name string, mode string, sop_root s
 		}
 		mut results := []string{}
 		for name in skill_names {
-			results << sync_sop_from_knowledge_with_paths(name, resolved_mode, sop_root,
-				jsonl_path)
+			results << sync_sop_from_knowledge_with_paths(name, resolved_mode, sop_root, jsonl_path)
 		}
 		return results.join('\n\n')
 	}
@@ -1335,8 +1340,8 @@ fn sync_sop_from_knowledge_with_paths(skill_name string, mode string, sop_root s
 	mut next_content := ''
 	if os.is_file(sop_path) {
 		content := os.read_file(sop_path) or { return 'Error: ${err.msg()}' }
-		next_content = upsert_generated_block(content, experience_sop_auto_begin, experience_sop_auto_end,
-			generated_block)
+		next_content = upsert_generated_block(content, experience_sop_auto_begin,
+			experience_sop_auto_end, generated_block)
 	} else {
 		next_content = default_sop_content(trimmed, generated_block)
 	}
@@ -1346,7 +1351,8 @@ fn sync_sop_from_knowledge_with_paths(skill_name string, mode string, sop_root s
 
 fn sync_sop_from_knowledge(arg string) string {
 	target, mode := parse_skill_sync_target_and_mode(arg)
-	return sync_sop_from_knowledge_with_paths(target, mode, get_global_sops_dir(), get_experience_jsonl_path())
+	return sync_sop_from_knowledge_with_paths(target, mode, get_global_sops_dir(),
+		get_experience_jsonl_path())
 }
 
 fn list_sop_names_with_root(sop_root string) []string {
@@ -1673,8 +1679,7 @@ fn match_sop_with_root(task string, sop_root string, limit int) string {
 }
 
 fn match_sop(task string, limit int) string {
-	return match_sop_with_paths(task, get_global_sops_dir(), get_experience_jsonl_path(),
-		limit)
+	return match_sop_with_paths(task, get_global_sops_dir(), get_experience_jsonl_path(), limit)
 }
 
 fn list_sops_text_with_root(sop_root string) string {

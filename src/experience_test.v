@@ -199,8 +199,8 @@ fn test_sync_skill_from_knowledge_with_paths_creates_skill_file() {
 	_ = record_experience_payload_with_paths('{"skill":"wechat-editor-image","title":"上传失败后回退","scenario":"setInputFiles 返回 Not allowed","action":"停止重试并提示用户手动上传","outcome":"保留正文内容不回滚","tags":"wechat,upload,fallback","confidence":4}',
 		db_path, jsonl_path, markdown_dir)
 
-	result := sync_skill_from_knowledge_with_paths('wechat-editor-image', 'balanced',
-		skill_root, jsonl_path)
+	result := sync_skill_from_knowledge_with_paths('wechat-editor-image', 'balanced', skill_root,
+		jsonl_path)
 	assert result.contains('已同步 skill')
 	assert result.contains('mode: balanced')
 
@@ -245,8 +245,8 @@ fn test_sync_skill_from_knowledge_with_paths_updates_existing_block() {
 		return
 	}
 
-	result := sync_skill_from_knowledge_with_paths('wechat-editor-image', 'balanced',
-		skill_root, jsonl_path)
+	result := sync_skill_from_knowledge_with_paths('wechat-editor-image', 'balanced', skill_root,
+		jsonl_path)
 	assert result.contains('records: 1')
 
 	content := os.read_file(skill_path) or { '' }
@@ -390,8 +390,7 @@ fn test_sync_skill_from_knowledge_with_paths_all_mode_creates_multiple_skill_fil
 	_ = record_experience_payload_with_paths('{"skill":"browser-ops","title":"浏览器低置信失败","scenario":"元素持续不可见","action":"降级为人工确认","outcome":"保留当前页面状态","tags":"browser,fallback","confidence":4}',
 		db_path, jsonl_path, markdown_dir)
 
-	concise_result := sync_skill_from_knowledge_with_paths('all', 'concise', skill_root,
-		jsonl_path)
+	concise_result := sync_skill_from_knowledge_with_paths('all', 'concise', skill_root, jsonl_path)
 	assert concise_result.contains('已同步 skill: wechat-editor-image')
 	assert concise_result.contains('已同步 skill: browser-ops')
 	assert concise_result.contains('mode: concise')
@@ -409,8 +408,7 @@ fn test_sync_skill_from_knowledge_with_paths_all_mode_creates_multiple_skill_fil
 	assert !browser_concise.contains('### Useful Tags')
 	assert wechat_concise.contains('### Recent Evidence')
 
-	strict_result := sync_skill_from_knowledge_with_paths('all', 'strict', skill_root,
-		jsonl_path)
+	strict_result := sync_skill_from_knowledge_with_paths('all', 'strict', skill_root, jsonl_path)
 	assert strict_result.contains('mode: strict')
 
 	wechat_strict := os.read_file(wechat_skill_path) or { '' }
@@ -494,8 +492,7 @@ fn test_sync_sop_from_knowledge_with_paths_creates_and_updates_sop_file() {
 		assert false
 		return
 	}
-	_ = sync_sop_from_knowledge_with_paths('wechat-editor-image', 'strict', sop_root,
-		jsonl_path)
+	_ = sync_sop_from_knowledge_with_paths('wechat-editor-image', 'strict', sop_root, jsonl_path)
 	updated := os.read_file(sop_path) or { '' }
 	assert updated.contains('手写说明。')
 	assert updated.contains('Trailing notes.')
@@ -600,17 +597,18 @@ fn test_match_sop_with_root_returns_best_candidate() {
 	sop_root := os.join_path(base, 'sops-root')
 	os.mkdir_all(os.join_path(sop_root, 'wechat-mp-draft-publisher')) or {}
 	os.mkdir_all(os.join_path(sop_root, 'browser-ops')) or {}
-	os.write_file(os.join_path(sop_root, 'wechat-mp-draft-publisher', 'SOP.md'), '# SOP\n\n微信公众号草稿箱发布流程\n先检查草稿箱状态，再设置封面。') or {
+	os.write_file(os.join_path(sop_root, 'wechat-mp-draft-publisher', 'SOP.md'),
+		'# SOP\n\n微信公众号草稿箱发布流程\n先检查草稿箱状态，再设置封面。') or {
 		assert false
 		return
 	}
-	os.write_file(os.join_path(sop_root, 'browser-ops', 'SOP.md'), '# SOP\n\n普通浏览器点击流程') or {
+	os.write_file(os.join_path(sop_root, 'browser-ops', 'SOP.md'),
+		'# SOP\n\n普通浏览器点击流程') or {
 		assert false
 		return
 	}
 
-	result := match_sop_with_root('请处理微信公众号草稿箱封面', sop_root,
-		2)
+	result := match_sop_with_root('请处理微信公众号草稿箱封面', sop_root, 2)
 	assert result.contains('TOP: wechat-mp-draft-publisher')
 	assert result.contains('strategy: single_sop_first')
 	assert result.contains('suggested_read_order:')
@@ -627,7 +625,8 @@ fn test_match_sop_with_root_handles_no_match() {
 
 	sop_root := os.join_path(base, 'sops-root')
 	os.mkdir_all(os.join_path(sop_root, 'browser-ops')) or {}
-	os.write_file(os.join_path(sop_root, 'browser-ops', 'SOP.md'), '# SOP\n\n普通浏览器点击流程') or {
+	os.write_file(os.join_path(sop_root, 'browser-ops', 'SOP.md'),
+		'# SOP\n\n普通浏览器点击流程') or {
 		assert false
 		return
 	}
@@ -646,7 +645,8 @@ fn test_match_sop_with_paths_uses_experience_tags_weight() {
 	markdown_dir := os.join_path(base, 'skills')
 	os.mkdir_all(os.join_path(sop_root, 'wechat-mp-draft-publisher')) or {}
 	os.mkdir_all(os.join_path(sop_root, 'browser-ops')) or {}
-	os.write_file(os.join_path(sop_root, 'wechat-mp-draft-publisher', 'SOP.md'), '# SOP\n\n发布流程\n先检查状态再继续。') or {
+	os.write_file(os.join_path(sop_root, 'wechat-mp-draft-publisher', 'SOP.md'),
+		'# SOP\n\n发布流程\n先检查状态再继续。') or {
 		assert false
 		return
 	}
@@ -654,11 +654,10 @@ fn test_match_sop_with_paths_uses_experience_tags_weight() {
 		assert false
 		return
 	}
-	_ = record_experience_payload_with_paths('{"skill":"wechat-mp-draft-publisher","title":"公众号草稿处理","scenario":"公众号草稿箱页面","action":"先检查草稿状态","outcome":"流程稳定","tags":"wechat,mp,draft,publisher","confidence":5}',
-		os.join_path(base, 'skills.db'), jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"wechat-mp-draft-publisher","title":"公众号草稿处理","scenario":"公众号草稿箱页面","action":"先检查草稿状态","outcome":"流程稳定","tags":"wechat,mp,draft,publisher","confidence":5}', os.join_path(base,
+		'skills.db'), jsonl_path, markdown_dir)
 
-	result := match_sop_with_paths('请处理微信草稿封面', sop_root, jsonl_path,
-		2)
+	result := match_sop_with_paths('请处理微信草稿封面', sop_root, jsonl_path, 2)
 	assert result.contains('TOP: wechat-mp-draft-publisher')
 	assert result.contains('score_breakdown:')
 	assert result.contains('matched_layers:')
@@ -674,11 +673,13 @@ fn test_match_sop_with_paths_prefers_skill_name_over_body_only_match() {
 	jsonl_path := os.join_path(base, 'experiences.jsonl')
 	os.mkdir_all(os.join_path(sop_root, 'wechat-mp-draft-publisher')) or {}
 	os.mkdir_all(os.join_path(sop_root, 'generic-publisher')) or {}
-	os.write_file(os.join_path(sop_root, 'wechat-mp-draft-publisher', 'SOP.md'), '# SOP\n\n通用发布步骤') or {
+	os.write_file(os.join_path(sop_root, 'wechat-mp-draft-publisher', 'SOP.md'),
+		'# SOP\n\n通用发布步骤') or {
 		assert false
 		return
 	}
-	os.write_file(os.join_path(sop_root, 'generic-publisher', 'SOP.md'), '# SOP\n\n微信公众号草稿箱封面发布流程') or {
+	os.write_file(os.join_path(sop_root, 'generic-publisher', 'SOP.md'),
+		'# SOP\n\n微信公众号草稿箱封面发布流程') or {
 		assert false
 		return
 	}
@@ -687,8 +688,7 @@ fn test_match_sop_with_paths_prefers_skill_name_over_body_only_match() {
 		return
 	}
 
-	result := match_sop_with_paths('wechat mp publisher workflow', sop_root, jsonl_path,
-		2)
+	result := match_sop_with_paths('wechat mp publisher workflow', sop_root, jsonl_path, 2)
 	assert result.contains('TOP: wechat-mp-draft-publisher')
 	assert result.contains('score_breakdown: exact_query=')
 	assert result.contains('matched_layers: skill_name')
@@ -704,18 +704,20 @@ fn test_match_sop_with_paths_suggests_multi_sop_sequence_for_compound_task() {
 	markdown_dir := os.join_path(base, 'skills')
 	os.mkdir_all(os.join_path(sop_root, 'wechat-mp-draft-publisher')) or {}
 	os.mkdir_all(os.join_path(sop_root, 'browser-ops')) or {}
-	os.write_file(os.join_path(sop_root, 'wechat-mp-draft-publisher', 'SOP.md'), '# SOP\n\n公众号草稿封面处理流程') or {
+	os.write_file(os.join_path(sop_root, 'wechat-mp-draft-publisher', 'SOP.md'),
+		'# SOP\n\n公众号草稿封面处理流程') or {
 		assert false
 		return
 	}
-	os.write_file(os.join_path(sop_root, 'browser-ops', 'SOP.md'), '# SOP\n\n浏览器点击校验流程') or {
+	os.write_file(os.join_path(sop_root, 'browser-ops', 'SOP.md'),
+		'# SOP\n\n浏览器点击校验流程') or {
 		assert false
 		return
 	}
-	_ = record_experience_payload_with_paths('{"skill":"wechat-mp-draft-publisher","title":"公众号草稿处理","scenario":"公众号草稿箱页面","action":"先检查草稿状态","outcome":"流程稳定","tags":"wechat,mp,draft,publisher","confidence":5}',
-		os.join_path(base, 'skills.db'), jsonl_path, markdown_dir)
-	_ = record_experience_payload_with_paths('{"skill":"browser-ops","title":"浏览器点击巡检","scenario":"浏览器页面已打开","action":"检查关键按钮点击反馈","outcome":"巡检流程稳定","tags":"browser,click,qa,check","confidence":5}',
-		os.join_path(base, 'skills.db'), jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"wechat-mp-draft-publisher","title":"公众号草稿处理","scenario":"公众号草稿箱页面","action":"先检查草稿状态","outcome":"流程稳定","tags":"wechat,mp,draft,publisher","confidence":5}', os.join_path(base,
+		'skills.db'), jsonl_path, markdown_dir)
+	_ = record_experience_payload_with_paths('{"skill":"browser-ops","title":"浏览器点击巡检","scenario":"浏览器页面已打开","action":"检查关键按钮点击反馈","outcome":"巡检流程稳定","tags":"browser,click,qa,check","confidence":5}', os.join_path(base,
+		'skills.db'), jsonl_path, markdown_dir)
 
 	result := match_sop_with_paths('先处理微信公众号草稿封面，然后执行浏览器点击巡检',
 		sop_root, jsonl_path, 3)

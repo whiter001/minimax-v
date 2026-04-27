@@ -74,6 +74,7 @@ fn apply_cli_boolean_flag(mut client ApiClient, arg string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -217,6 +218,7 @@ fn apply_cli_value_flag(mut client ApiClient, arg string, args []string, current
 		}
 		else {}
 	}
+
 	return result
 }
 
@@ -254,6 +256,7 @@ fn apply_cli_runtime_flag(mut client ApiClient, arg string, mut runtime_flags Cl
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -308,6 +311,7 @@ fn parse_cli_args(mut client ApiClient, args []string, initial_prompt string, in
 				}
 			}
 		}
+
 		k++
 	}
 	return result
@@ -360,6 +364,7 @@ fn detect_prompt_mode(args []string) !(string, bool) {
 				}
 			}
 		}
+
 		j++
 	}
 	return prompt, is_interactive

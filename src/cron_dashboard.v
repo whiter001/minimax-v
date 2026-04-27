@@ -300,11 +300,11 @@ fn sync_cron_dashboard_jobs(scheduler CronScheduler) ! {
 	statements << 'DELETE FROM cron_jobs;'
 	for job in scheduler.list_jobs() {
 		statements <<
-			'INSERT INTO cron_jobs (job_id, name_hex, schedule_hex, command_hex, run_once, enabled, last_run, next_run, execution_count, created_at) VALUES (' +
-			sql_quote(job.id) + ', ' + hex_sql(job.name) + ', ' + hex_sql(job.schedule) + ', ' +
-			hex_sql(job.command) + ', ' + bool_sql(job.run_once) + ', ' + bool_sql(job.enabled) +
-			', ' + job.last_run.str() + ', ' + job.next_run.str() + ', ' +
-			job.execution_count.str() + ', ' + job.created_at.str() + ');'
+			'INSERT INTO cron_jobs (job_id, name_hex, schedule_hex, command_hex, run_once, enabled, last_run, next_run, execution_count, created_at) VALUES (' + sql_quote(job.id) +
+			', ' + hex_sql(job.name) + ', ' + hex_sql(job.schedule) + ', ' + hex_sql(job.command) +
+			', ' + bool_sql(job.run_once) + ', ' + bool_sql(job.enabled) + ', ' +
+			job.last_run.str() + ', ' + job.next_run.str() + ', ' + job.execution_count.str() +
+			', ' + job.created_at.str() + ');'
 	}
 	statements << 'COMMIT;'
 	_ = sqlite_exec(db_path, statements.join('\n'))!
@@ -315,16 +315,17 @@ fn record_cron_dashboard_execution(job CronJob, started_at time.Time, finished_a
 	ensure_cron_dashboard_db(db_path)!
 	duration_ms := finished_at.unix_milli() - started_at.unix_milli()
 	statement :=
-		'INSERT INTO cron_executions (job_id, job_name_hex, schedule_hex, command_hex, started_at, finished_at, duration_ms, exit_code, output_hex, created_at) VALUES (' +
-		sql_quote(job.id) + ', ' + hex_sql(job.name) + ', ' + hex_sql(job.schedule) + ', ' +
-		hex_sql(job.command) + ', ' + started_at.unix().str() + ', ' + finished_at.unix().str() +
-		', ' + duration_ms.str() + ', ' + exit_code.str() + ', ' + hex_sql(output) + ', ' +
+		'INSERT INTO cron_executions (job_id, job_name_hex, schedule_hex, command_hex, started_at, finished_at, duration_ms, exit_code, output_hex, created_at) VALUES (' + sql_quote(job.id) +
+		', ' + hex_sql(job.name) + ', ' + hex_sql(job.schedule) + ', ' + hex_sql(job.command) +
+		', ' + started_at.unix().str() + ', ' + finished_at.unix().str() + ', ' +
+		duration_ms.str() + ', ' + exit_code.str() + ', ' + hex_sql(output) + ', ' +
 		finished_at.unix().str() + ');'
 	_ = sqlite_exec(db_path, statement)!
 }
 
 fn load_cron_dashboard_jobs(db_path string) ![]CronDashboardJobView {
-	output := sqlite_exec(db_path, 'SELECT job_id, name_hex, schedule_hex, command_hex, run_once, enabled, last_run, next_run, execution_count, created_at FROM cron_jobs ORDER BY enabled DESC, next_run ASC, created_at DESC;')!
+	output := sqlite_exec(db_path,
+		'SELECT job_id, name_hex, schedule_hex, command_hex, run_once, enabled, last_run, next_run, execution_count, created_at FROM cron_jobs ORDER BY enabled DESC, next_run ASC, created_at DESC;')!
 	mut jobs := []CronDashboardJobView{}
 	for line in output.split_into_lines() {
 		trimmed := line.trim_space()

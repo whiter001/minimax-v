@@ -137,8 +137,7 @@ fn test_extract_text_blocks_escaped_newline() {
 
 fn test_extract_text_blocks_decodes_unicode_and_backslashes() {
 	content := '[{"type":"text","text":"\\u4e2d\\u6587 C:\\\\tmp\\\\file.txt"}]'
-	assert extract_text_blocks(content) == '中文 C:\\tmp\\file.txt'.replace('\\\\',
-		'\\')
+	assert extract_text_blocks(content) == '中文 C:\\tmp\\file.txt'.replace('\\\\', '\\')
 }
 
 // ===== extract_thinking_blocks =====

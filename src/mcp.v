@@ -431,7 +431,8 @@ fn mcp_list_tools(mut server McpServer) {
 fn mcp_call_tool(mut server McpServer, tool_name string, arguments string) !string {
 	params := '{"name":"${tool_name}","arguments":${arguments}}'
 
-	response := mcp_send_request_with_timeout(mut server, 'tools/call', params, mcp_tool_timeout_ms(tool_name)) or {
+	response := mcp_send_request_with_timeout(mut server, 'tools/call', params,
+		mcp_tool_timeout_ms(tool_name)) or {
 		mcp_log(server.name, '✗ ${tool_name} error: ${err}')
 		return error('MCP 调用失败: ${err}')
 	}
@@ -636,8 +637,8 @@ fn parse_mcp_call_result(response string) !string {
 						}
 						if end > value_start {
 							text := content_arr[value_start..end]
-							text_result += text.replace('\\n', '\n').replace('\\t', '\t').replace('\\"',
-								'"')
+							text_result +=
+								text.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"')
 						}
 						pos = end + 1
 					} else {

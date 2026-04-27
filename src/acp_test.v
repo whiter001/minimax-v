@@ -28,14 +28,17 @@ fn test_acp_initialize_request() {
 
 fn test_acp_new_session_cancel_and_prompt() {
 	mut server := new_test_acp_server()
-	new_resp := server.handle_request('{"jsonrpc":"2.0","id":10,"method":"newSession","params":{"cwd":"."}}')
+	new_resp :=
+		server.handle_request('{"jsonrpc":"2.0","id":10,"method":"newSession","params":{"cwd":"."}}')
 	session_id := extract_json_string_value(new_resp, 'sessionId')
 	assert session_id.len > 0
 
-	cancel_resp := server.handle_request('{"jsonrpc":"2.0","id":11,"method":"cancel","params":{"sessionId":"${session_id}"}}')
+	cancel_resp :=
+		server.handle_request('{"jsonrpc":"2.0","id":11,"method":"cancel","params":{"sessionId":"${session_id}"}}')
 	assert cancel_resp.contains('"id":11')
 
-	prompt_resp := server.handle_request('{"jsonrpc":"2.0","id":12,"method":"prompt","params":{"sessionId":"${session_id}","prompt":[{"type":"text","text":"ping"}]}}')
+	prompt_resp :=
+		server.handle_request('{"jsonrpc":"2.0","id":12,"method":"prompt","params":{"sessionId":"${session_id}","prompt":[{"type":"text","text":"ping"}]}}')
 	assert prompt_resp.contains('"id":12')
 	assert prompt_resp.contains('"stopReason":"cancelled"')
 }
@@ -67,7 +70,8 @@ fn test_acp_tools_list() {
 
 fn test_acp_sampling() {
 	mut server := new_test_acp_server()
-	resp := server.handle_request('{"jsonrpc":"2.0","id":102,"method":"sampling","params":{"message":{"role":"user","content":[{"type":"text","text":"hello"}]}}}')
+	resp :=
+		server.handle_request('{"jsonrpc":"2.0","id":102,"method":"sampling","params":{"message":{"role":"user","content":[{"type":"text","text":"hello"}]}}}')
 	assert resp.contains('"id":102')
 	assert resp.contains('"code":-32601')
 	assert resp.contains('not implemented')
@@ -75,7 +79,8 @@ fn test_acp_sampling() {
 
 fn test_acp_logging() {
 	mut server := new_test_acp_server()
-	resp := server.handle_request('{"jsonrpc":"2.0","id":103,"method":"logging","params":{"level":"debug","logger":"test","data":"hello"}}')
+	resp :=
+		server.handle_request('{"jsonrpc":"2.0","id":103,"method":"logging","params":{"level":"debug","logger":"test","data":"hello"}}')
 	assert resp.contains('"id":103')
 	assert resp.contains('"result"')
 	assert resp.contains('"received":true')

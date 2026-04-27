@@ -241,7 +241,7 @@ pub fn (mut scheduler CronScheduler) tick() ! {
 }
 
 // 列出所有任务
-pub fn (scheduler CronScheduler) list_jobs() []CronJob {
+pub fn (scheduler CronScheduler) list_jobs() []main.CronJob {
 	mut jobs := []CronJob{}
 	for _, job in scheduler.jobs {
 		jobs << job
@@ -686,7 +686,7 @@ pub fn (mut mgr TimerManager) tick_execute(execute_fn fn (Timer) !) ([]string, b
 }
 
 // 列出所有定时器
-pub fn (mgr TimerManager) list_timers() []Timer {
+pub fn (mgr TimerManager) list_timers() []main.Timer {
 	mut result := []Timer{}
 	for _, timer in mgr.timers {
 		result << timer

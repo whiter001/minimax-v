@@ -473,8 +473,10 @@ fn test_extract_tool_command_head_handles_basic_cases() {
 }
 
 fn test_summarize_path_entries_prefers_focus_terms() {
-	summary := summarize_path_entries('C:\\Windows;C:\\Users\\white\\.bun\\bin;D:\\public',
-		['bun', 'public'], 8)
+	summary := summarize_path_entries('C:\\Windows;C:\\Users\\white\\.bun\\bin;D:\\public', [
+		'bun',
+		'public',
+	], 8)
 	assert summary.contains('.bun\\bin')
 	assert summary.contains('D:\\public')
 	assert !summary.contains('C:\\Windows')

@@ -323,8 +323,10 @@ fn test_build_skills_metadata_with_skills() {
 	os.mkdir_all(os.join_path(workspace, '.agents', 'skills', 'test1')) or {}
 	os.mkdir_all(os.join_path(workspace, '.agents', 'skills', 'test2')) or {}
 	defer { os.rmdir_all(workspace) or {} }
-	os.write_file(os.join_path(workspace, '.agents', 'skills', 'test1', 'SKILL.md'), '---\nname: test1\ndescription: desc1\n---\n\np') or {}
-	os.write_file(os.join_path(workspace, '.agents', 'skills', 'test2', 'SKILL.md'), '---\nname: test2\ndescription: desc2\n---\n\np') or {}
+	os.write_file(os.join_path(workspace, '.agents', 'skills', 'test1', 'SKILL.md'),
+		'---\nname: test1\ndescription: desc1\n---\n\np') or {}
+	os.write_file(os.join_path(workspace, '.agents', 'skills', 'test2', 'SKILL.md'),
+		'---\nname: test2\ndescription: desc2\n---\n\np') or {}
 	meta := build_skills_metadata(workspace)
 	assert meta.contains('Available Skills')
 	assert meta.contains('activate_skill')
@@ -385,8 +387,10 @@ fn test_load_custom_skills_from_dir_subdir_structure() {
 	os.mkdir_all(os.join_path(base_dir, 'beta')) or {}
 	defer { os.rmdir_all(base_dir) or {} }
 
-	os.write_file(os.join_path(base_dir, 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: Alpha skill\n---\n\nAlpha prompt.') or {}
-	os.write_file(os.join_path(base_dir, 'beta', 'SKILL.md'), '---\nname: beta\ndescription: Beta skill\n---\n\nBeta prompt.') or {}
+	os.write_file(os.join_path(base_dir, 'alpha', 'SKILL.md'),
+		'---\nname: alpha\ndescription: Alpha skill\n---\n\nAlpha prompt.') or {}
+	os.write_file(os.join_path(base_dir, 'beta', 'SKILL.md'),
+		'---\nname: beta\ndescription: Beta skill\n---\n\nBeta prompt.') or {}
 
 	load_custom_skills_from_dir(base_dir, 'project', mut registry)
 
@@ -415,7 +419,8 @@ fn test_load_custom_skills_from_dir_root_skill_md() {
 	defer { os.rmdir_all(base_dir) or {} }
 
 	// SKILL.md directly in the skills dir (not in a subdirectory)
-	os.write_file(os.join_path(base_dir, 'SKILL.md'), '---\nname: root-skill\ndescription: In root\n---\n\nRoot prompt.') or {}
+	os.write_file(os.join_path(base_dir, 'SKILL.md'),
+		'---\nname: root-skill\ndescription: In root\n---\n\nRoot prompt.') or {}
 
 	load_custom_skills_from_dir(base_dir, 'user', mut registry)
 	assert registry.skills.len == 1
@@ -442,7 +447,8 @@ fn test_full_tier_discovery() {
 	defer { os.rmdir_all('/tmp/__minimax_full_tier__') or {} }
 
 	// Project skill that overrides builtin 'coder'
-	os.write_file(os.join_path(skills_dir, 'SKILL.md'), '---\nname: coder\ndescription: Project coder\n---\n\nProject-level coder prompt.') or {}
+	os.write_file(os.join_path(skills_dir, 'SKILL.md'),
+		'---\nname: coder\ndescription: Project coder\n---\n\nProject-level coder prompt.') or {}
 
 	// The 'coder' should be project-level, not builtin
 	if skill := find_skill(project_dir, 'coder') {

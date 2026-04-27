@@ -100,7 +100,8 @@ pub fn (canvas Canvas) render() string {
 	// 标题
 	output += '╔${'═'.repeat(canvas.width - 2)}╗\n'
 	padding := (canvas.width - canvas.title.len - 2) / 2
-	output += '║ ${' '.repeat(padding)}${canvas.title}${' '.repeat(canvas.width - 2 - padding - canvas.title.len)} ║\n'
+	output += '║ ${' '.repeat(padding)}${canvas.title}${' '.repeat(canvas.width - 2 - padding -
+		canvas.title.len)} ║\n'
 	output += '╠${'═'.repeat(canvas.width - 2)}╣\n'
 
 	// 内容

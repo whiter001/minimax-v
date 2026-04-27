@@ -39,7 +39,8 @@ fn (l Logger) log(level string, category string, message string) {
 }
 
 fn (l Logger) log_request(model string, messages_count int, has_tools bool, is_streaming bool) {
-	l.log('INFO', 'REQUEST', 'model=${model} messages=${messages_count} tools=${has_tools} stream=${is_streaming}')
+	l.log('INFO', 'REQUEST',
+		'model=${model} messages=${messages_count} tools=${has_tools} stream=${is_streaming}')
 }
 
 fn (l Logger) log_user_prompt(prompt string) {
@@ -62,7 +63,8 @@ fn (l Logger) log_ai_response(text string, is_truncated bool) {
 }
 
 fn (l Logger) log_response(stop_reason string, text_len int, tool_count int, thinking_len int) {
-	l.log('INFO', 'RESPONSE', 'stop_reason=${stop_reason} text_len=${text_len} tools=${tool_count} thinking_len=${thinking_len}')
+	l.log('INFO', 'RESPONSE',
+		'stop_reason=${stop_reason} text_len=${text_len} tools=${tool_count} thinking_len=${thinking_len}')
 }
 
 fn (l Logger) log_tool_call(name string, input_keys string) {
@@ -89,8 +91,7 @@ fn (l Logger) log_tool_result_detail(name string, result string) {
 	} else {
 		result
 	}
-	l.log('INFO', 'TOOL_RESULT_DETAIL', 'name=${name} result=${truncated.replace('\n',
-		'\\n')}')
+	l.log('INFO', 'TOOL_RESULT_DETAIL', 'name=${name} result=${truncated.replace('\n', '\\n')}')
 }
 
 fn (l Logger) log_tool_diagnostic(name string, detail string) {
@@ -113,7 +114,8 @@ fn (l Logger) log_mcp_request(server string, method string, params string) {
 
 fn (l Logger) log_mcp_response(server string, method string, result_len int, is_error bool) {
 	status := if is_error { 'ERROR' } else { 'OK' }
-	l.log('DEBUG', 'MCP_RES', 'server=${server} method=${method} result_len=${result_len} status=${status}')
+	l.log('DEBUG', 'MCP_RES',
+		'server=${server} method=${method} result_len=${result_len} status=${status}')
 }
 
 fn (l Logger) log_browser_snapshot(action string, url string, element_count int, title string) {
@@ -125,7 +127,8 @@ fn (l Logger) log_error(category string, message string) {
 }
 
 fn (l Logger) log_summarize(old_messages int, new_estimate int) {
-	l.log('INFO', 'SUMMARIZE', 'compressed=${old_messages} messages, new_token_estimate=~${new_estimate}')
+	l.log('INFO', 'SUMMARIZE',
+		'compressed=${old_messages} messages, new_token_estimate=~${new_estimate}')
 }
 
 fn (l Logger) log_session_start(version string, model string) {

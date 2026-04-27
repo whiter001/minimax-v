@@ -428,6 +428,7 @@ fn build_timer_text(timer Timer) string {
 		.timeout { 'setTimeout' }
 		.interval { 'setInterval' }
 	}
+
 	status := if timer.enabled { 'enabled' } else { 'disabled' }
 	interval_str := if timer.interval_sec > 0 {
 		'${timer.interval_sec}s'
@@ -456,6 +457,7 @@ fn build_timers_text(timers []Timer) string {
 			.timeout { 'timeout' }
 			.interval { 'interval' }
 		}
+
 		status := if timer.enabled { '✓' } else { '✗' }
 		lines << '${status} [${timer.id}] ${timer.name} (${timer_type_str}, 下次 ${format_timer_timestamp(timer.next_run)})'
 	}

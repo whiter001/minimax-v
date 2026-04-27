@@ -395,7 +395,8 @@ pub fn (mut c ApiClient) refine_prompt(prompt string) !string {
 
 	// Safety check: if refined prompt is too long, fallback to original
 	if refined.len > 15000 {
-		c.logger.log_error('REFINE', 'refined prompt too long (${refined.len} chars), falling back to original')
+		c.logger.log_error('REFINE',
+			'refined prompt too long (${refined.len} chars), falling back to original')
 		if !c.silent_mode {
 			println('\x1b[33m⚠️  优化结果过长 (${refined.len} 字符)，将使用原始提示词。\x1b[0m')
 		}
@@ -787,7 +788,8 @@ fn (mut c ApiClient) repair_message_history_for_api() bool {
 	sanitized, changed := sanitize_messages_for_api(c.messages)
 	if changed {
 		c.messages = sanitized
-		c.logger.log('WARN', 'MESSAGE_HISTORY', 'sanitized invalid tool_use/tool_result history before API request')
+		c.logger.log('WARN', 'MESSAGE_HISTORY',
+			'sanitized invalid tool_use/tool_result history before API request')
 	}
 	return changed
 }
@@ -814,8 +816,8 @@ fn truncate_tool_output_with_notice(text string, max_bytes int) (string, bool) {
 	if text.len <= max_bytes {
 		return text, false
 	}
-	return utf8_safe_truncate(text, max_bytes) +
-		'\n\n[... truncated, ${text.len - max_bytes} chars omitted]', true
+	return utf8_safe_truncate(text, max_bytes) + '\n\n[... truncated, ${text.len -
+		max_bytes} chars omitted]', true
 }
 
 fn trim_status_detail(detail string, limit int) string {
@@ -1001,7 +1003,8 @@ fn (mut c ApiClient) finalize_successful_round(mut step AgentStep, parsed Parsed
 	step.thought = parsed.text
 	step.thinking = parsed.thinking
 	c.log_parsed_thinking_if_needed(parsed)
-	c.logger.log_response(parsed.stop_reason, parsed.text.len, parsed.tool_uses.len, parsed.thinking.len)
+	c.logger.log_response(parsed.stop_reason, parsed.text.len, parsed.tool_uses.len,
+		parsed.thinking.len)
 	c.logger.log_ai_response(parsed.text, false)
 	c.store_assistant_response(parsed)
 }
@@ -1031,7 +1034,8 @@ fn (mut c ApiClient) block_repeated_failed_tool_batch(mut step AgentStep, mut ex
 		content:      ''
 		content_json: build_tool_error_results_json(tools, message)
 	}
-	c.add_message('user', 'SYSTEM: 不要再次执行相同且已连续失败的工具调用。必须更换策略、修改参数，或先总结现状。')
+	c.add_message('user',
+		'SYSTEM: 不要再次执行相同且已连续失败的工具调用。必须更换策略、修改参数，或先总结现状。')
 }
 
 fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tools []ToolUse, last_failed_bash_command string, failed_bash_command_streak int) ToolRoundExecutionResult {
@@ -1052,7 +1056,8 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 		tool_start_ms := time.now().unix_milli()
 		tool_detail := summarize_tool_timing_detail(tu)
 		c.print_phase_status(tool_phase_message(tu), tool_detail)
-		c.logger.log_phase_start('tool.execute', 'step=${step.step_number} round=${tool_round} name=${tu.name} ${tool_detail}')
+		c.logger.log_phase_start('tool.execute',
+			'step=${step.step_number} round=${tool_round} name=${tu.name} ${tool_detail}')
 		mut raw_result := ''
 		if should_block_repeated_failed_bash_command(tu, next_last_failed_bash_command,
 			next_failed_bash_command_streak)
@@ -1060,8 +1065,8 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 			raw_result = 'Error: 检测到相同的 bash 失败命令已连续重复，已阻止再次执行。请先修改命令、检查路径或权限，或改用其他工具。'
 			c.logger.log('WARN', 'TOOL_GUARD', 'blocked repeated failed bash command')
 		} else {
-			raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, mut c.bash_session,
-				tu, c.workspace, c.config, c.acp_mode, c.term_ui_enabled, c.term_ui_app)
+			raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, mut c.bash_session, tu,
+				c.workspace, c.config, c.acp_mode, c.term_ui_enabled, c.term_ui_app)
 		}
 		c.logger.log_phase_end('tool.execute', time.now().unix_milli() - tool_start_ms,
 			'step=${step.step_number} round=${tool_round} name=${tu.name} ${tool_detail}')
@@ -1136,11 +1141,12 @@ fn (mut c ApiClient) complete_task_done(mut step AgentStep, mut execution AgentE
 		} else {
 			'general'
 		}
-		c.logger.log('INFO', 'SELF_CORRECTION', 'Automating experience for task with ${total_retries} retries')
+		c.logger.log('INFO', 'SELF_CORRECTION',
+			'Automating experience for task with ${total_retries} retries')
 		exp_msg := record_experience_automated(skill_name, 'Self-Correction: ' + c.trajectory.task,
-			'Task completed after ${total_retries} retries', 'Iterative tool execution and error correction',
-			'Success: ' + utf8_safe_truncate(task_done_result, 200), 'self-correction,retry-success',
-			4)
+			'Task completed after ${total_retries} retries',
+			'Iterative tool execution and error correction', 'Success: ' +
+			utf8_safe_truncate(task_done_result, 200), 'self-correction,retry-success', 4)
 		if !c.silent_mode {
 			println('\x1b[36m💡 Self-Correction: 自动记录多次重试后的成功路径...\x1b[0m')
 			if c.debug {
@@ -1167,35 +1173,52 @@ fn (mut c ApiClient) send_api_request(body_json string) !string {
 		println('[DEBUG] 发送请求... body=${body_json.len} bytes')
 	}
 
-	mut headers := http.new_header()
-	headers.add(.authorization, 'Bearer ${c.api_key}')
-	headers.add(.content_type, 'application/json')
-	headers.add(.connection, 'close') // avoid stale keep-alive connections
-
-	mut req := http.Request{
-		method:        .post
-		url:           c.api_url
-		header:        headers
-		data:          body_json
-		read_timeout:  180 * time.second
-		write_timeout: 60 * time.second
+	// Use curl for better reliability on Windows (V's mbedtls HTTP module has issues)
+	if c.debug && !c.silent_mode {
+		println('[DEBUG] 使用 curl 发送请求...')
 	}
-
-	response := req.do() or {
-		c.logger.log_error('API', 'phase=api.request mode=${request_mode} duration_ms=${time.now().unix_milli() - start_ms} err=${err}')
+	curl_result := c.send_api_request_via_curl(body_json) or {
+		c.logger.log_error('API',
+			'phase=api.request mode=${request_mode} duration_ms=${time.now().unix_milli() - start_ms} err=${err}')
 		c.clear_phase_status_line()
 		return err
 	}
-
-	if response.status_code != 200 {
-		c.logger.log_error('API', 'phase=api.request mode=${request_mode} duration_ms=${time.now().unix_milli() - start_ms} status=${response.status_code}')
-		c.clear_phase_status_line()
-		return error('API Error ${response.status_code}: ${response.body}')
-	}
-	c.logger.log_phase_end('api.request', time.now().unix_milli() - start_ms, 'mode=${request_mode} bytes=${body_json.len} status=${response.status_code} body_bytes=${response.body.len}')
+	c.logger.log_phase_end('api.request', time.now().unix_milli() - start_ms,
+		'mode=${request_mode}+curl bytes=${body_json.len} status=200 body_bytes=${curl_result.len}')
 	c.clear_phase_status_line()
+	return curl_result
+}
 
-	return response.body
+fn (mut c ApiClient) send_api_request_via_curl(body_json string) !string {
+	stamp := time.now().unix_milli()
+	tmp_response := os.join_path(os.temp_dir(), 'minimax_response_${stamp}.body')
+	tmp_request := os.join_path(os.temp_dir(), 'minimax_request_${stamp}.json')
+	os.write_file(tmp_request, body_json) or {
+		return error('failed to write curl request body: ${err.msg()}')
+	}
+	defer {
+		os.rm(tmp_response) or {}
+		os.rm(tmp_request) or {}
+	}
+
+	// Use @file syntax with proper escaping for Windows
+	tmp_response_escaped := tmp_response.replace('/', '\\')
+	tmp_request_escaped := tmp_request.replace('/', '\\')
+	command := 'curl --silent --show-error --http1.1 --output "${tmp_response_escaped}" --write-out "%{http_code}" -X POST "${c.api_url}" -H "Authorization: Bearer ${c.api_key}" -H "Content-Type: application/json" --data-binary @"${tmp_request_escaped}" --max-time 180'
+	result := os.execute(command)
+	if result.exit_code != 0 {
+		return error('curl fallback failed: ${result.output.trim_space()}')
+	}
+
+	code := result.output.trim_space()
+	body := os.read_file(tmp_response) or {
+		return error('failed to read curl response: ${err.msg()}')
+	}
+	status_code := code.int()
+	if status_code != 200 {
+		return error('API Error ${status_code}: ${body}')
+	}
+	return body
 }
 
 fn (mut c ApiClient) send_streaming_request(body_json string) !StreamResult {
@@ -1311,8 +1334,8 @@ fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bo
 							}
 							if end > start {
 								text := json_str[start..end]
-								unescaped := text.replace('\\n', '\n').replace('\\t',
-									'\t').replace('\\"', '"')
+								unescaped :=
+									text.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"')
 								if c.term_ui_is_active() {
 									c.term_ui_append_thinking(unescaped)
 								} else if state.show_output {
@@ -1340,8 +1363,8 @@ fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bo
 							}
 							if end > start {
 								text := json_str[start..end]
-								unescaped := text.replace('\\n', '\n').replace('\\t',
-									'\t').replace('\\"', '"')
+								unescaped :=
+									text.replace('\\n', '\n').replace('\\t', '\t').replace('\\"', '"')
 								if c.term_ui_is_active() {
 									c.term_ui_append_stream_text(unescaped)
 								} else if state.show_output {
@@ -1362,13 +1385,15 @@ fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bo
 	}
 
 	response := req.do() or {
-		c.logger.log_error('API', 'phase=api.stream duration_ms=${time.now().unix_milli() - start_ms} err=${err}')
+		c.logger.log_error('API',
+			'phase=api.stream duration_ms=${time.now().unix_milli() - start_ms} err=${err}')
 		c.clear_phase_status_line()
 		return err
 	}
 
 	if response.status_code != 200 {
-		c.logger.log_error('API', 'phase=api.stream duration_ms=${time.now().unix_milli() - start_ms} status=${response.status_code}')
+		c.logger.log_error('API',
+			'phase=api.stream duration_ms=${time.now().unix_milli() - start_ms} status=${response.status_code}')
 		c.clear_phase_status_line()
 		return error('API Error ${response.status_code}: ${response.body}')
 	}
@@ -1409,7 +1434,8 @@ fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bo
 	if state.show_output && !c.term_ui_is_active() {
 		println('')
 	}
-	c.logger.log_phase_end('api.stream', time.now().unix_milli() - start_ms, 'bytes=${body_json.len} text_len=${final_text.len} thinking_len=${final_thinking.len}')
+	c.logger.log_phase_end('api.stream', time.now().unix_milli() - start_ms,
+		'bytes=${body_json.len} text_len=${final_text.len} thinking_len=${final_thinking.len}')
 	// newline after streaming output
 	return StreamResult{
 		text:     final_text
@@ -1577,13 +1603,15 @@ fn (mut c ApiClient) chat(prompt string) !string {
 						streaming_disabled_for_task = true
 						c.use_streaming = false
 						fallback_to_non_streaming = true
-						c.logger.log_error('API', 'stream transport error detected, disabling streaming for this task: ${err.str()}')
+						c.logger.log_error('API',
+							'stream transport error detected, disabling streaming for this task: ${err.str()}')
 						StreamResult{}
 					} else {
 						c.use_streaming = false
-						consecutive_errors = c.handle_chat_request_retry(mut step, mut
-							execution, consecutive_errors, 'streaming request failed',
-							err.str()) or { return err }
+						consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
+							consecutive_errors, 'streaming request failed', err.str()) or {
+							return err
+						}
 						continue
 					}
 				}
@@ -1596,12 +1624,14 @@ fn (mut c ApiClient) chat(prompt string) !string {
 						streaming_disabled_for_task = true
 						c.use_streaming = false
 						fallback_to_non_streaming = true
-						c.logger.log_error('API', 'stream transport error detected, disabling streaming for this task: ${err.str()}')
+						c.logger.log_error('API',
+							'stream transport error detected, disabling streaming for this task: ${err.str()}')
 						StreamResult{}
 					} else {
-						consecutive_errors = c.handle_chat_request_retry(mut step, mut
-							execution, consecutive_errors, 'streaming request failed',
-							err.str()) or { return err }
+						consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
+							consecutive_errors, 'streaming request failed', err.str()) or {
+							return err
+						}
 						continue
 					}
 				}
@@ -1621,13 +1651,12 @@ fn (mut c ApiClient) chat(prompt string) !string {
 					if c.debug && !c.silent_mode {
 						println('[DEBUG] 强制流式返回空响应，回退非流式重试...')
 					}
-					c.logger.log_error('API', 'forced streaming returned empty parsed response, retrying non-streaming')
+					c.logger.log_error('API',
+						'forced streaming returned empty parsed response, retrying non-streaming')
 					c.logger.log_request(c.model, c.messages.len, true, false)
 					response_body := c.send_api_request(body_json) or {
-						consecutive_errors = c.handle_chat_request_retry(mut step, mut
-							execution, consecutive_errors, 'request failed', err.str()) or {
-							return err
-						}
+						consecutive_errors = c.handle_chat_request_retry(mut step, mut execution,
+							consecutive_errors, 'request failed', err.str()) or { return err }
 						continue
 					}
 					parsed = c.parse_non_streaming_response(response_body)
@@ -1693,12 +1722,13 @@ fn (mut c ApiClient) chat(prompt string) !string {
 
 			// task_done: early exit if agent signaled completion
 			if tool_round_result.task_done_result.len > 0 {
-				return c.complete_task_done(mut step, mut execution, tool_round_result.task_done_result,
-					total_retries_in_task)
+				return c.complete_task_done(mut step, mut execution,
+					tool_round_result.task_done_result, total_retries_in_task)
 			}
 
 			// Reflection: check for tool errors and generate reflection message
-			reflection := generate_reflection(tool_round_result.tool_results, tool_round_result.tool_names)
+			reflection := generate_reflection(tool_round_result.tool_results,
+				tool_round_result.tool_names)
 			if reflection.len > 0 {
 				step.state = .reflecting
 				step.reflection = reflection
@@ -1720,7 +1750,8 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			// Failure escalation: after repeated tool failures, force user handoff in interactive mode.
 			if tool_round_result.round_has_tool_errors {
 				if consecutive_tool_failure_rounds == 2 {
-					c.add_message('user', 'SYSTEM: 连续两轮工具执行失败。请先探测环境状态并避免重复同样参数。')
+					c.add_message('user',
+						'SYSTEM: 连续两轮工具执行失败。请先探测环境状态并避免重复同样参数。')
 				} else if consecutive_tool_failure_rounds >= tool_failure_escalation_round {
 					if c.interactive_mode && !c.acp_mode {
 						question := '连续${consecutive_tool_failure_rounds}轮工具失败。请告诉我你希望我下一步怎么做（例如改目标/给路径/允许先总结）。'
@@ -1728,12 +1759,15 @@ fn (mut c ApiClient) chat(prompt string) !string {
 							c.term_ui_app)
 						if user_guidance.len > 0 && !user_guidance.starts_with('Error:')
 							&& user_guidance != '(User provided no answer)' {
-							c.add_message('user', 'User guidance (failure escalation): ${user_guidance}')
+							c.add_message('user',
+								'User guidance (failure escalation): ${user_guidance}')
 						} else if tool_round_result.round_all_tool_errors {
-							c.add_message('user', 'SYSTEM: 多轮工具全部失败，请先调用 ask_user 澄清需求后再继续。')
+							c.add_message('user',
+								'SYSTEM: 多轮工具全部失败，请先调用 ask_user 澄清需求后再继续。')
 						}
 					} else if tool_round_result.round_all_tool_errors {
-						c.add_message('user', 'SYSTEM: 多轮工具全部失败，请先调用 ask_user 澄清需求后再继续。')
+						c.add_message('user',
+							'SYSTEM: 多轮工具全部失败，请先调用 ask_user 澄清需求后再继续。')
 					}
 					consecutive_tool_failure_rounds = 0
 				}
