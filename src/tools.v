@@ -468,13 +468,15 @@ fn send_mail_tool(config Config, mailserver string, mailport int, username strin
 	}
 	// Port 465 uses implicit SSL, port 587 uses STARTTLS
 	use_ssl := final_port == 465
-	client_cfg := smtp.Client{
+	use_starttls := final_port == 587
+	client_cfg := smtp.Config{
 		server:   final_server
 		from:     final_from
 		port:     final_port
 		username: final_username
 		password: final_password
 		ssl:      use_ssl
+		starttls: use_starttls
 	}
 	send_cfg := smtp.Mail{
 		to:        final_to
