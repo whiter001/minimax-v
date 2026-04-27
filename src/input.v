@@ -126,7 +126,7 @@ fn read_macos_interactive_input(prompt string) ?string {
 		}
 
 		mut state := old_state
-		state.c_lflag &= termios.invert(termios.flag(C.ICANON) | termios.flag(C.ECHO))
+		state.c_lflag &= termios.invert(termios.flag(int(C.ICANON)) | termios.flag(int(C.ECHO)))
 		if termios.tcsetattr(0, C.TCSANOW, mut state) != 0 {
 			return os.input(prompt)
 		}

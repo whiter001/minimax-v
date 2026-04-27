@@ -61,9 +61,26 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install V
+        if: runner.os != 'Windows'
         uses: vlang/setup-v@v1.4
         with:
           version: ${{ env.V_VERSION }}
+
+      - name: Install V (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP 'vlang-nightly'
+          if (Test-Path $installDir) {
+            Remove-Item -LiteralPath $installDir -Recurse -Force
+          }
+          git clone --filter=blob:none https://github.com/vlang/v $installDir
+          Set-Location $installDir
+          git fetch --depth 1 origin $env:V_VERSION
+          git checkout $env:V_VERSION
+          cmd /c makev.bat
+          $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          .\v.exe version
 
       - name: Build binary
         shell: pwsh
