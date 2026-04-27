@@ -610,7 +610,8 @@ fn test_resolve_image_generation_save_path_multi_file() {
 
 fn test_resolve_image_generation_save_path_directory() {
 	path := resolve_image_generation_save_path('/tmp/images', 0, 1, true)
-	assert path.starts_with('/tmp/images/')
+	normalized := path.replace('\\', '/')
+	assert normalized.starts_with('/tmp/images/')
 	assert path.ends_with('.jpeg')
 }
 

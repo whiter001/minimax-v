@@ -2,9 +2,11 @@ module main
 
 import encoding.base64
 import encoding.hex
+import io
 import json
+import net
 import net.http
-import net.smtp
+import net.ssl
 import os
 import strings
 import time
@@ -426,6 +428,235 @@ fn macos_accessibility_doctor_check() DoctorCheck {
 
 // --- Mail Tool ---
 
+enum SimpleSmtpBodyType {
+	text
+	html
+}
+
+struct SimpleSmtpMail {
+	from      string
+	to        string
+	subject   string
+	body_type SimpleSmtpBodyType
+	body      string
+}
+
+struct SimpleSmtpClient {
+mut:
+	server       string
+	port         int
+	username     string
+	password     string
+	from         string
+	use_ssl      bool
+	use_starttls bool
+	timeout      time.Duration
+	conn         net.TcpConn
+	ssl_conn     &ssl.SSLConn = unsafe { nil }
+	reader       ?&io.BufferedReader
+	is_open      bool
+	encrypted    bool
+}
+
+fn new_simple_smtp_client(server string, port int, username string, password string, from string, use_ssl bool, use_starttls bool) !SimpleSmtpClient {
+	if use_ssl && use_starttls {
+		return error('cannot use both implicit SSL and STARTTLS')
+	}
+	mut client := SimpleSmtpClient{
+		server:       server
+		port:         port
+		username:     username
+		password:     password
+		from:         from
+		use_ssl:      use_ssl
+		use_starttls: use_starttls
+		timeout:      30 * time.second
+	}
+	client.connect()!
+	return client
+}
+
+fn (mut c SimpleSmtpClient) connect() ! {
+	if c.is_open {
+		return error('already connected to server')
+	}
+
+	mut conn := net.dial_tcp('${c.server}:${c.port}') or {
+		return error('connecting to server failed: ${err.msg()}')
+	}
+	if c.timeout != 0 {
+		conn.set_read_timeout(c.timeout)
+		conn.set_write_timeout(c.timeout)
+	}
+	c.conn = conn
+
+	if c.use_ssl {
+		c.connect_ssl()!
+	} else {
+		c.reader = io.new_buffered_reader(reader: c.conn)
+	}
+
+	c.expect_reply(220) or { return error('received invalid response from server: ${err.msg()}') }
+	c.send_ehlo() or { return error('sending EHLO failed: ${err.msg()}') }
+
+	if c.use_starttls && !c.encrypted {
+		c.send_command_expect('STARTTLS\r\n', 220) or {
+			return error('sending STARTTLS failed: ${err.msg()}')
+		}
+		c.connect_ssl() or { return error('starting TLS failed: ${err.msg()}') }
+		c.send_ehlo() or { return error('sending EHLO after STARTTLS failed: ${err.msg()}') }
+	}
+
+	c.send_auth() or { return error('authenticating to server failed: ${err.msg()}') }
+	c.is_open = true
+}
+
+fn (mut c SimpleSmtpClient) connect_ssl() ! {
+	c.ssl_conn = ssl.new_ssl_conn()!
+	c.ssl_conn.connect(mut c.conn, c.server) or {
+		return error('connecting to server using TLS failed: ${err}')
+	}
+	c.reader = io.new_buffered_reader(reader: c.ssl_conn)
+	c.encrypted = true
+}
+
+fn (mut c SimpleSmtpClient) expect_reply(expected int) ! {
+	mut line := ''
+	for {
+		line = c.reader or { return error('smtp reader is not initialized') }.read_line()!
+		if line.len < 3 {
+			return error('invalid SMTP response: ${line}')
+		}
+		if line.len >= 4 && line[3] == `-` {
+			continue
+		}
+		break
+	}
+	status := line[..3].int()
+	if status != expected {
+		return error('received unexpected status code ${status}, expected ${expected}')
+	}
+}
+
+fn (mut c SimpleSmtpClient) send_raw(data string) ! {
+	if c.encrypted {
+		c.ssl_conn.write(data.bytes())!
+	} else {
+		c.conn.write(data.bytes())!
+	}
+}
+
+fn (mut c SimpleSmtpClient) send_command_expect(command string, expected int) ! {
+	c.send_raw(command)!
+	c.expect_reply(expected)!
+}
+
+fn (mut c SimpleSmtpClient) send_ehlo() ! {
+	c.send_command_expect('EHLO ${c.server}\r\n', 250)!
+}
+
+fn (mut c SimpleSmtpClient) send_auth() ! {
+	if c.username.len == 0 {
+		return
+	}
+	mut sb := strings.new_builder(c.username.len + c.password.len + 2)
+	sb.write_u8(0)
+	sb.write_string(c.username)
+	sb.write_u8(0)
+	sb.write_string(c.password)
+	token := base64.encode_str(sb.str())
+	c.send_command_expect('AUTH PLAIN ${token}\r\n', 235)!
+}
+
+fn split_smtp_recipients(to string) []string {
+	mut recipients := []string{}
+	for candidate in to.replace(',', ';').split(';') {
+		trimmed := candidate.trim_space()
+		if trimmed.len > 0 {
+			recipients << trimmed
+		}
+	}
+	return recipients
+}
+
+fn fold_smtp_base64(encoded string) string {
+	if encoded.len <= 76 {
+		return encoded
+	}
+	mut sb := strings.new_builder(encoded.len + encoded.len / 76 * 2)
+	for start := 0; start < encoded.len; start += 76 {
+		end := if start + 76 < encoded.len { start + 76 } else { encoded.len }
+		sb.write_string(encoded[start..end])
+		if end < encoded.len {
+			sb.write_string('\r\n')
+		}
+	}
+	return sb.str()
+}
+
+fn build_simple_smtp_message(message SimpleSmtpMail) string {
+	date_header := time.now().custom_format('ddd, D MMM YYYY HH:mm ZZ')
+	subject_header := if message.subject.bytes().any(it < u8(` `) || it > u8(`~`)) {
+		'=?utf-8?B?${base64.encode_str(message.subject)}?='
+	} else {
+		message.subject
+	}
+	recipients := split_smtp_recipients(message.to)
+	mime_type := if message.body_type == .html { 'text/html' } else { 'text/plain' }
+	body_base64 := fold_smtp_base64(base64.encode_str(message.body))
+	mut sb := strings.new_builder(256 + body_base64.len + message.body.len)
+	sb.write_string('From: ${message.from}\r\n')
+	sb.write_string('To: <${recipients.join('>; <')}>\r\n')
+	sb.write_string('Date: ${date_header}\r\n')
+	sb.write_string('Subject: ${subject_header}\r\n')
+	sb.write_string('MIME-Version: 1.0\r\n')
+	sb.write_string('Content-Type: ${mime_type}; charset=UTF-8\r\n')
+	sb.write_string('Content-Transfer-Encoding: base64\r\n\r\n')
+	sb.write_string(body_base64)
+	sb.write_string('\r\n.\r\n')
+	return sb.str()
+}
+
+fn (mut c SimpleSmtpClient) send_mail(message SimpleSmtpMail) ! {
+	if !c.is_open {
+		return error('disconnected from server')
+	}
+	resolved_from := if message.from.len > 0 { message.from } else { c.from }
+	recipients := split_smtp_recipients(message.to)
+	if recipients.len == 0 {
+		return error('recipient is required')
+	}
+	c.send_command_expect('MAIL FROM: <${resolved_from}>\r\n', 250) or {
+		return error('sending MAIL FROM failed: ${err.msg()}')
+	}
+	for recipient in recipients {
+		c.send_command_expect('RCPT TO: <${recipient}>\r\n', 250) or {
+			return error('sending RCPT TO failed: ${err.msg()}')
+		}
+	}
+	c.send_command_expect('DATA\r\n', 354) or { return error('sending DATA failed: ${err.msg()}') }
+	c.send_raw(build_simple_smtp_message(SimpleSmtpMail{
+		...message
+		from: resolved_from
+	})) or { return error('sending mail body failed: ${err.msg()}') }
+	c.expect_reply(250) or { return error('mail server rejected message body: ${err.msg()}') }
+}
+
+fn (mut c SimpleSmtpClient) quit() ! {
+	if !c.is_open {
+		return
+	}
+	c.send_raw('QUIT\r\n')!
+	c.expect_reply(221)!
+	if c.encrypted {
+		c.ssl_conn.shutdown() or {}
+	} else {
+		c.conn.close() or {}
+	}
+	c.is_open = false
+	c.encrypted = false
+}
+
 fn send_mail_tool(config Config, mailserver string, mailport int, username string, password string, from string, to string, subject string, body string) string {
 	// Use config defaults when tool parameters are empty
 	final_server := if mailserver.len > 0 { mailserver } else { config.smtp_server }
@@ -469,25 +700,19 @@ fn send_mail_tool(config Config, mailserver string, mailport int, username strin
 	// Port 465 uses implicit SSL, port 587 uses STARTTLS
 	use_ssl := final_port == 465
 	use_starttls := final_port == 587
-	client_cfg := smtp.Config{
-		server:   final_server
-		from:     final_from
-		port:     final_port
-		username: final_username
-		password: final_password
-		ssl:      use_ssl
-		starttls: use_starttls
+	mut client := new_simple_smtp_client(final_server, final_port, final_username, final_password,
+		final_from, use_ssl, use_starttls) or {
+		return 'Error: failed to connect to mail server: ${err.msg()}'
 	}
-	send_cfg := smtp.Mail{
+	defer {
+		client.quit() or {}
+	}
+	client.send_mail(SimpleSmtpMail{
 		to:        final_to
 		subject:   subject
 		body_type: .html
 		body:      body
-	}
-	mut client := smtp.new_client(client_cfg) or {
-		return 'Error: failed to connect to mail server: ${err.msg()}'
-	}
-	client.send(send_cfg) or { return 'Error: failed to send mail: ${err.msg()}' }
+	}) or { return 'Error: failed to send mail: ${err.msg()}' }
 	return 'Mail sent successfully to ${final_to}'
 }
 
