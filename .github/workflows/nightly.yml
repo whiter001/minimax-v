@@ -11,6 +11,7 @@ permissions:
 env:
   PROJECT_NAME: minimax-v
   BINARY_NAME: minimax_cli
+  V_VERSION: a2be3749cecadd4d63802c9f14cbe20e04cc39fa
 
 jobs:
   verify:
@@ -23,7 +24,7 @@ jobs:
       - name: Install V
         uses: vlang/setup-v@v1.4
         with:
-          check-latest: true
+          version: ${{ env.V_VERSION }}
 
       - name: Verify formatting
         shell: bash
@@ -62,7 +63,7 @@ jobs:
       - name: Install V
         uses: vlang/setup-v@v1.4
         with:
-          check-latest: true
+          version: ${{ env.V_VERSION }}
 
       - name: Build binary
         shell: pwsh
