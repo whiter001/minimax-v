@@ -118,7 +118,7 @@ v -g -o minimax_cli src/
 
 ### 扩展能力
 
-- Skills：按目录自动发现和切换，默认扫描 `~/.config/minimax/skills` / `~/.agents/skills`，项目级 `.agents/skills` 需要先设置 `--workspace` 或 `MINIMAX_WORKSPACE`；可用 `--auto-skills` 让 AI 自动选择并激活匹配 skill。
+- Skills：按目录自动发现和切换，默认扫描 `~/.config/minimax/skills` / `~/.agents/skills`，项目级 `.agents/skills` 需要先设置 `--workspace` 或 `MINIMAX_WORKSPACE`；`SKILL.md` 支持 `tags` / `tools` / `triggers` / `platform` frontmatter；启用 `--auto-skills` 后会先在本地筛出最相关的 skills 和片段，再让 AI 决定是否激活最合适的 skill。
 - SOPs：默认扫描 `~/.config/minimax/sops/<skill>/SOP.md`；开启工具调用后会自动暴露可用 SOP，并在任务匹配时先读取对应 SOP 作为执行前检查。
 - Custom Commands：基于 TOML 的命令模板。
 - Extensions：安装、启用、更新命令与 MCP 组合包。

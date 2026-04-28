@@ -13,6 +13,41 @@ fn new_test_skill_registry() SkillRegistry {
 
 fn reset_registry() {}
 
+struct SkillTestEnv {
+	base                 string
+	previous_config_home string
+	previous_home        string
+}
+
+fn setup_skill_test_env(name string) SkillTestEnv {
+	base := os.join_path(os.temp_dir(), name)
+	os.rmdir_all(base) or {}
+	os.mkdir_all(base) or {}
+	previous := os.getenv_opt('MINIMAX_CONFIG_HOME') or { '' }
+	previous_home := os.getenv_opt('HOME') or { '' }
+	os.setenv('MINIMAX_CONFIG_HOME', base, true)
+	os.setenv('HOME', base, true)
+	return SkillTestEnv{
+		base:                 base
+		previous_config_home: previous
+		previous_home:        previous_home
+	}
+}
+
+fn restore_skill_test_env(env SkillTestEnv) {
+	if env.previous_config_home.len > 0 {
+		os.setenv('MINIMAX_CONFIG_HOME', env.previous_config_home, true)
+	} else {
+		os.unsetenv('MINIMAX_CONFIG_HOME')
+	}
+	if env.previous_home.len > 0 {
+		os.setenv('HOME', env.previous_home, true)
+	} else {
+		os.unsetenv('HOME')
+	}
+	os.rmdir_all(env.base) or {}
+}
+
 // ===== parse_skill_md =====
 
 fn test_parse_skill_md_valid() {
@@ -142,6 +177,30 @@ fn test_parse_skill_md_quoted_values() {
 	assert skill.description == 'quoted desc'
 }
 
+fn test_parse_skill_md_structured_metadata() {
+	dir := os.join_path(os.temp_dir(), '__minimax_skill_test_meta__')
+	os.mkdir_all(dir) or {}
+	defer { os.rmdir_all(dir) or {} }
+
+	path := os.join_path(dir, 'SKILL.md')
+	os.write_file(path,
+		'---\nname: background-runner\ndescription: Run background jobs\ntags:\n  - background\n  - pueue\ntools: [bash, pueue]\ntriggers:\n  - 帮我后台跑任务\n  - check pueue status\nplatform: windows\n---\n\n# Workflow\n\nUse pueue to manage queued tasks.\n') or {
+		assert false
+		return
+	}
+
+	skill := parse_skill_md(path, 'user') or {
+		assert false
+		return
+	}
+	assert skill.tags == ['background', 'pueue']
+	assert skill.tools == ['bash', 'pueue']
+	assert skill.triggers == ['帮我后台跑任务', 'check pueue status']
+	assert skill.platform == 'windows'
+	assert skill.sections.len == 1
+	assert skill.sections[0].heading == 'Workflow'
+}
+
 fn test_parse_skill_md_nonexistent_file() {
 	if _ := parse_skill_md('/tmp/__no_such_file_skill__.md', 'user') {
 		assert false, 'should return none for nonexistent file'
@@ -266,6 +325,8 @@ fn test_add_or_override_three_tier() {
 // ===== find_skill =====
 
 fn test_find_skill_builtin() {
+	env := setup_skill_test_env('__minimax_skill_find_builtin__')
+	defer { restore_skill_test_env(env) }
 	if skill := find_skill('', 'coder') {
 		assert skill.name == 'coder'
 		assert skill.source == 'builtin'
@@ -275,6 +336,8 @@ fn test_find_skill_builtin() {
 }
 
 fn test_find_skill_not_found() {
+	env := setup_skill_test_env('__minimax_skill_find_missing__')
+	defer { restore_skill_test_env(env) }
 	if _ := find_skill('', 'nonexistent-skill') {
 		assert false, 'should return none'
 	}
@@ -295,6 +358,8 @@ fn test_get_builtin_skills_count() {
 }
 
 fn test_get_all_skills_after_init() {
+	env := setup_skill_test_env('__minimax_skill_get_all__')
+	defer { restore_skill_test_env(env) }
 	all := get_all_skills('')
 	assert all.len >= 15
 }
@@ -302,6 +367,8 @@ fn test_get_all_skills_after_init() {
 // ===== activate_skill_tool =====
 
 fn test_activate_skill_tool_success() {
+	env := setup_skill_test_env('__minimax_skill_activate_success__')
+	defer { restore_skill_test_env(env) }
 	result := activate_skill_tool('', 'debugger')
 	assert result.contains('Skill activated')
 	assert result.contains('debugger')
@@ -309,6 +376,8 @@ fn test_activate_skill_tool_success() {
 }
 
 fn test_activate_skill_tool_not_found() {
+	env := setup_skill_test_env('__minimax_skill_activate_missing__')
+	defer { restore_skill_test_env(env) }
 	result := activate_skill_tool('', 'nonexistent')
 	assert result.contains('not found')
 	assert result.contains('Available skills')
@@ -318,6 +387,8 @@ fn test_activate_skill_tool_not_found() {
 // ===== build_skills_metadata =====
 
 fn test_build_skills_metadata_with_skills() {
+	env := setup_skill_test_env('__minimax_skill_meta__')
+	defer { restore_skill_test_env(env) }
 	workspace := os.join_path(os.temp_dir(), '__minimax_skill_meta__')
 	os.rmdir_all(workspace) or {}
 	os.mkdir_all(os.join_path(workspace, '.agents', 'skills', 'test1')) or {}
@@ -330,11 +401,13 @@ fn test_build_skills_metadata_with_skills() {
 	meta := build_skills_metadata(workspace)
 	assert meta.contains('Available Skills')
 	assert meta.contains('activate_skill')
-	assert meta.contains('test1: desc1')
-	assert meta.contains('test2: desc2')
+	assert meta.contains('test1: desc1 [project]')
+	assert meta.contains('test2: desc2 [project]')
 }
 
 fn test_build_skills_metadata_empty() {
+	env := setup_skill_test_env('__minimax_skill_meta_empty__')
+	defer { restore_skill_test_env(env) }
 	workspace := os.join_path(os.temp_dir(), '__minimax_skill_meta_empty__')
 	os.rmdir_all(workspace) or {}
 	os.mkdir_all(workspace) or {}
@@ -342,6 +415,44 @@ fn test_build_skills_metadata_empty() {
 	meta := build_skills_metadata(workspace)
 	assert meta.contains('Available Skills')
 	assert meta.contains('coder')
+}
+
+fn test_select_relevant_skills_prefers_metadata_match() {
+	env := setup_skill_test_env('__minimax_skill_select__')
+	defer { restore_skill_test_env(env) }
+	workspace := os.join_path(os.temp_dir(), '__minimax_skill_select_workspace__')
+	os.rmdir_all(workspace) or {}
+	defer { os.rmdir_all(workspace) or {} }
+	os.mkdir_all(os.join_path(workspace, '.agents', 'skills', 'background-runner')) or {}
+	os.mkdir_all(os.join_path(workspace, '.agents', 'skills', 'frontend-ui')) or {}
+	os.write_file(os.join_path(workspace, '.agents', 'skills', 'background-runner', 'SKILL.md'),
+		'---\nname: background-runner\ndescription: Manage background jobs\ntags:\n  - background\n  - queue\ntools:\n  - bash\n  - pueue\ntriggers:\n  - 后台跑任务\n  - check pueue status\nplatform: windows\n---\n\n# Workflow\n\nUse pueue to queue and inspect background tasks.\n') or {}
+	os.write_file(os.join_path(workspace, '.agents', 'skills', 'frontend-ui', 'SKILL.md'),
+		'---\nname: frontend-ui\ndescription: Build browser UI\ntags:\n  - react\n  - css\ntools:\n  - bash\ntriggers:\n  - 调整页面样式\n---\n\n# Workflow\n\nWork on frontend components.\n') or {}
+
+	matches :=
+		select_relevant_skills(workspace, '帮我在后台跑任务并查看 pueue 状态', 2)
+	assert matches.len >= 1
+	assert matches[0].skill.name == 'background-runner'
+	assert 'tools' in matches[0].matched_fields || 'triggers' in matches[0].matched_fields
+}
+
+fn test_build_auto_skills_context_includes_relevant_excerpt() {
+	env := setup_skill_test_env('__minimax_skill_auto_context__')
+	defer { restore_skill_test_env(env) }
+	workspace := os.join_path(os.temp_dir(), '__minimax_skill_auto_context_workspace__')
+	os.rmdir_all(workspace) or {}
+	defer { os.rmdir_all(workspace) or {} }
+	os.mkdir_all(os.join_path(workspace, '.agents', 'skills', 'background-runner')) or {}
+	os.write_file(os.join_path(workspace, '.agents', 'skills', 'background-runner', 'SKILL.md'),
+		'---\nname: background-runner\ndescription: Manage background jobs\ntools:\n  - pueue\ntriggers:\n  - 后台跑任务\n---\n\n# Overview\n\nThis skill handles background work.\n\n# Workflow\n\nCheck pueue status before resuming or pausing jobs.\n') or {}
+
+	context :=
+		build_auto_skills_context(workspace, '先看 pueue 状态，再恢复后台任务', 2)
+	assert context.contains('Auto-selected skills for the current task')
+	assert context.contains('background-runner')
+	assert context.contains('matched_terms')
+	assert context.contains('### Workflow')
 }
 
 // ===== create_skill_template =====
@@ -430,6 +541,8 @@ fn test_load_custom_skills_from_dir_root_skill_md() {
 // ===== reload_skill_registry =====
 
 fn test_reload_skill_registry() {
+	env := setup_skill_test_env('__minimax_skill_reload__')
+	defer { restore_skill_test_env(env) }
 	registry := reload_skill_registry('')
 	assert registry.loaded == true
 	assert registry.skills.len >= 15 // at least builtins
@@ -438,6 +551,8 @@ fn test_reload_skill_registry() {
 // ===== Integration: full tier discovery =====
 
 fn test_full_tier_discovery() {
+	env := setup_skill_test_env('__minimax_skill_full_tier__')
+	defer { restore_skill_test_env(env) }
 	reset_registry()
 	// Setup project-level skills
 	project_dir := '/tmp/__minimax_full_tier__/project'
@@ -470,6 +585,8 @@ fn test_full_tier_discovery() {
 // ===== print_skills_list (no crash test) =====
 
 fn test_print_skills_list_no_crash() {
+	env := setup_skill_test_env('__minimax_skill_print__')
+	defer { restore_skill_test_env(env) }
 	reset_registry()
 	// Just verify no panic
 	print_skills_list('', '')

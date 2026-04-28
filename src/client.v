@@ -419,6 +419,21 @@ fn append_system_prompt_part(mut parts []string, part string) {
 	}
 }
 
+fn latest_user_request(messages []ChatMessage) string {
+	for i := messages.len - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.role != 'user' || msg.content_json.len > 0 {
+			continue
+		}
+		trimmed := msg.content.trim_space()
+		if trimmed.len == 0 || trimmed.starts_with('SYSTEM:') {
+			continue
+		}
+		return trimmed
+	}
+	return ''
+}
+
 fn (mut c ApiClient) build_request_json_internal(messages []ChatMessage) string {
 	mut body_json := '{"model":"${c.model}","max_tokens":${c.max_tokens},"temperature":${c.temperature}'
 
@@ -457,12 +472,17 @@ fn (mut c ApiClient) build_request_json_internal(messages []ChatMessage) string 
 
 	// Inject skills metadata so AI can discover and activate skills
 	if c.enable_tools {
-		skills_meta := build_skills_metadata(c.workspace)
+		skill_registry := load_skill_registry(c.workspace)
+		skills_meta := build_skills_metadata_from_registry(skill_registry)
 		append_system_prompt_part(mut system_parts, skills_meta)
 		sops_meta := build_sops_metadata()
 		append_system_prompt_part(mut system_parts, sops_meta)
 		if c.auto_skills {
-			auto_skills_instruction := 'When the user task matches one of the available skills, proactively call the activate_skill tool yourself before continuing. Choose the best matching skill without asking the user unless the choice is genuinely ambiguous.'
+			user_task := latest_user_request(messages)
+			auto_skills_context := build_auto_skills_context_from_registry(skill_registry,
+				user_task, default_auto_skill_context_limit)
+			append_system_prompt_part(mut system_parts, auto_skills_context)
+			auto_skills_instruction := 'Use the auto-selected skills above as your first-pass shortlist. If one skill is clearly relevant, proactively call activate_skill with that skill before continuing. If none clearly fit, continue without activating a skill. Only ask the user to choose when multiple shortlisted skills are genuinely ambiguous.'
 			append_system_prompt_part(mut system_parts, auto_skills_instruction)
 		}
 		if c.auto_check_sops && sops_meta.len > 0 {
@@ -1067,6 +1087,12 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 		} else {
 			raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, mut c.bash_session, tu,
 				c.workspace, c.config, c.acp_mode, c.term_ui_enabled, c.term_ui_app)
+		}
+		if tu.name == 'activate_skill' && !is_tool_error_result(raw_result) {
+			activated := (tu.input['name'] or { '' }).trim_space()
+			if activated.len > 0 {
+				c.current_skill = activated
+			}
 		}
 		c.logger.log_phase_end('tool.execute', time.now().unix_milli() - tool_start_ms,
 			'step=${step.step_number} round=${tool_round} name=${tu.name} ${tool_detail}')

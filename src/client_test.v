@@ -569,14 +569,37 @@ fn test_build_request_json_activate_skill_in_tools() {
 }
 
 fn test_build_request_json_auto_skills_adds_instruction() {
+	tmp_root := os.join_path(os.temp_dir(), 'minimax_client_test_auto_skills_${os.getpid()}')
+	workspace := os.join_path(tmp_root, 'workspace')
+	skill_dir := os.join_path(workspace, '.agents', 'skills', 'background-runner')
+	os.mkdir_all(skill_dir) or { panic(err) }
+	os.write_file(os.join_path(skill_dir, 'SKILL.md'),
+		'---\nname: background-runner\ndescription: Manage background tasks\ntools:\n  - pueue\ntriggers:\n  - 管理后台任务\n---\n\n# Workflow\n\nCheck pueue status before changing background jobs.\n') or {
+		panic(err)
+	}
+	old_home := os.getenv_opt('HOME') or { '' }
+	os.setenv('MINIMAX_CONFIG_HOME', tmp_root, true)
+	os.setenv('HOME', tmp_root, true)
+	defer {
+		os.unsetenv('MINIMAX_CONFIG_HOME')
+		if old_home.len > 0 {
+			os.setenv('HOME', old_home, true)
+		} else {
+			os.unsetenv('HOME')
+		}
+		os.rmdir_all(tmp_root) or {}
+	}
 	mut config := default_config()
 	config.api_key = 'test-key'
 	config.enable_tools = true
 	config.auto_skills = true
+	config.workspace = workspace
 	mut client := new_api_client(config)
 	client.add_message('user', '请帮我管理后台任务')
 	json := client.build_request_json()
-	assert json.contains('proactively call the activate_skill tool yourself')
+	assert json.contains('Auto-selected skills for the current task')
+	assert json.contains('background-runner')
+	assert json.contains('Use the auto-selected skills above as your first-pass shortlist')
 	assert json.contains('call record_experience if you verified a stable fix')
 }
 

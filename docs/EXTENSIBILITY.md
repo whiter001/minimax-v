@@ -60,7 +60,7 @@ MCP 用于把外部工具以 stdio JSON-RPC 的方式接入到 CLI。
 - 用户级技能默认会被扫描，无需额外参数。
 - 项目级 `.agents/skills` 只有在 workspace 已设置时才会被扫描；可通过 `--workspace PATH` 或环境变量 `MINIMAX_WORKSPACE` 指定。
 - `--skills` 用于列出当前已发现的技能，`--skill NAME` 用于直接启用某个技能。
-- `--auto-skills` 会让 AI 优先自行决定是否激活某个 skill；若未显式设置 workspace，则默认使用当前目录来纳入项目级 `.agents/skills`。
+- `--auto-skills` 会先根据当前任务在本地对已发现 skills 做轻量匹配和排序，把最相关的 skill 元信息与片段注入上下文，再让 AI 决定是否调用 `activate_skill`；若未显式设置 workspace，则默认使用当前目录来纳入项目级 `.agents/skills`。
 
 ## SOPs
 
@@ -77,12 +77,21 @@ MCP 用于把外部工具以 stdio JSON-RPC 的方式接入到 CLI。
 
 ### 文件格式
 
-技能文件名固定为 `SKILL.md`，使用 YAML frontmatter 声明元信息：
+技能文件名固定为 `SKILL.md`，使用 YAML frontmatter 声明元信息。当前会识别 `name`、`description`、`tags`、`tools`、`triggers`、`platform`，其中后四项会参与 autoskill 的本地匹配与排序：
 
 ```md
 ---
 name: reviewer
 description: Review code changes for bugs and regressions
+tags:
+  - review
+  - bug
+tools:
+  - read_file
+  - grep_search
+triggers:
+  - review this diff
+platform: cross-platform
 ---
 
 这里开始写技能正文，正文会作为系统提示注入。
