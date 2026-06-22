@@ -5,10 +5,10 @@ import os
 // ===== parse_config_content =====
 
 fn test_parse_config_basic() {
-	content := 'api_key=sk-test-123\nmodel=MiniMax-M2.7\ntemperature=0.5'
+	content := 'api_key=sk-test-123\nmodel=MiniMax-M3\ntemperature=0.5'
 	config := parse_config_content(content, default_config())
 	assert config.api_key == 'sk-test-123'
-	assert config.model == 'MiniMax-M2.7'
+	assert config.model == 'MiniMax-M3'
 	assert config.temperature == 0.5
 }
 
@@ -94,7 +94,7 @@ fn test_parse_config_max_tokens_out_of_range() {
 	content := 'max_tokens=204801'
 	config := parse_config_content(content, default_config())
 	// Out of range — should keep default
-	assert config.max_tokens == 102400
+	assert config.max_tokens == 32768
 }
 
 fn test_parse_config_max_rounds() {
@@ -176,11 +176,11 @@ fn test_parse_config_temperature_boundaries() {
 
 	// Invalid: 0.0 — outside range (0.0, 1.0]
 	config0 := parse_config_content('temperature=0.0', default_config())
-	assert config0.temperature == 0.7 // keeps default
+	assert config0.temperature == 1.0 // keeps default
 
 	// Invalid: 3.0 — outside range, keeps default
 	config3 := parse_config_content('temperature=3.0', default_config())
-	assert config3.temperature == 0.7
+	assert config3.temperature == 1.0
 }
 
 // ===== default_config =====
@@ -190,10 +190,10 @@ fn test_default_config() {
 	assert config.api_key == ''
 	assert config.api_url == 'https://api.minimaxi.com/anthropic/v1/messages'
 	assert config.image_api_url == 'https://api.minimaxi.com/v1/image_generation'
-	assert config.model == 'MiniMax-M2.7'
+	assert config.model == 'MiniMax-M3'
 	assert config.image_model == 'image-01'
-	assert config.temperature == 0.7
-	assert config.max_tokens == 102400
+	assert config.temperature == 1.0
+	assert config.max_tokens == 32768
 	assert config.max_rounds == 5000
 	assert config.token_limit == 80000
 	assert config.enable_tools == true
@@ -266,10 +266,10 @@ fn test_apply_env_override_rejects_invalid_numeric_values() {
 	apply_env_override(mut config, 'MINIMAX_MAX_ROUNDS', '5001')
 	apply_env_override(mut config, 'MINIMAX_TOKEN_LIMIT', '0')
 	apply_env_override(mut config, 'MINIMAX_TEMPERATURE', '3.0')
-	assert config.max_tokens == 102400
+	assert config.max_tokens == 32768
 	assert config.max_rounds == 5000
 	assert config.token_limit == 80000
-	assert config.temperature == 0.7
+	assert config.temperature == 1.0
 }
 
 fn test_apply_env_override_accepts_max_rounds_upper_bound() {

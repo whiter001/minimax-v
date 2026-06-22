@@ -89,7 +89,7 @@ fn test_detect_prompt_mode_prefers_explicit_prompt_flag() {
 }
 
 fn test_detect_prompt_mode_skips_other_option_values() {
-	prompt, is_interactive := detect_prompt_mode(['minimax_cli', '--model', 'MiniMax-M2.7',
+	prompt, is_interactive := detect_prompt_mode(['minimax_cli', '--model', 'MiniMax-M3',
 		'--workspace', '/tmp/project']) or { panic(err) }
 	assert prompt == ''
 	assert is_interactive

@@ -106,9 +106,9 @@ fn test_new_trajectory_recorder_enabled() {
 
 fn test_trajectory_recorder_start_recording() {
 	mut t := new_trajectory_recorder(true)
-	t.start_recording('my task', 'MiniMax-M2.7')
+	t.start_recording('my task', 'MiniMax-M3')
 	assert t.task == 'my task'
-	assert t.model == 'MiniMax-M2.7'
+	assert t.model == 'MiniMax-M3'
 	assert t.start_time.len > 0
 }
 

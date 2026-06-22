@@ -131,9 +131,9 @@ v -g -o minimax_cli src/
 
 ```ini
 api_url=https://api.minimaxi.com/anthropic/v1/messages
-model=MiniMax-M2.7
-temperature=0.7
-max_tokens=102400
+model=MiniMax-M3
+temperature=1.0
+max_tokens=32768
 max_rounds=5000
 token_limit=80000
 enable_tools=true

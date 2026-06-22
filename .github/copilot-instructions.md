@@ -51,7 +51,7 @@ v test src/config_test.v
    - 从 `~/.config/minimax/config`（key=value 格式）或 `~/.minimax_config`（旧版）加载配置
    - 支持环境变量覆盖（MINIMAX_API_KEY, MINIMAX_MODEL 等）
    - 跨平台路径展开（`~` 到主目录）
-   - 默认值：model=MiniMax-M2.7, temperature=0.7, max_tokens=102400
+   - 默认值：model=MiniMax-M3, temperature=1.0, max_tokens=32768
 
 4. **工具系统 (`tools.v`)**
    - 持久化 BashSession 跨工具调用维护工作目录和环境状态

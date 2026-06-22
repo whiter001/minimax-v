@@ -61,10 +61,10 @@ fn default_config() Config {
 		api_key:                ''
 		api_url:                'https://api.minimaxi.com/anthropic/v1/messages'
 		image_api_url:          'https://api.minimaxi.com/v1/image_generation'
-		model:                  'MiniMax-M2.7'
+		model:                  'MiniMax-M3'
 		image_model:            'image-01'
-		temperature:            0.7
-		max_tokens:             102400
+		temperature:            1.0
+		max_tokens:             32768
 		max_rounds:             5000
 		token_limit:            80000
 		system_prompt:          ''
