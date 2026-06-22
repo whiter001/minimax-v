@@ -124,6 +124,21 @@ v -g -o minimax_cli src/
 - Extensions：安装、启用、更新命令与 MCP 组合包。
 - Experience：把经验记录到本地知识库，并自动写回全局 skill 与全局 SOP。
 - Cron：本地定时任务子命令，支持 `cron dashboard` 本地页面查看任务与执行记录。
+- Subagent（子 Agent）：主 agent 可以通过 `spawn_subagent` 单次起子 agent，或通过 `agent_swarm` 批量并行起多个子 agent。三种内置 profile（`coder` 全工具、`explore` 只读、`plan` 只规划）。每个子 agent 上下文完全隔离，跑完后把摘要回填给主 agent，trajectory 单独存到 `~/.config/minimax/trajectories/subagent_<id>.json`。并发数、超时、嵌套深度、ramp 间隔都可配。
+
+### Subagent 用法
+
+主 agent 在对话中会自己决定何时调用 subagent。你也可以直接通过 headless 触发：
+
+```bash
+# 单个 subagent（让 coder 帮我修 src/foo.v）
+minimax_cli -p '用 spawn_subagent 帮我修 src/foo.v 的 bug，profile=coder，prompt=阅读 src/foo.v 后定位并修复编译错误'
+
+# 批量 swarm（并行看 src/ 下所有 .v 文件）
+minimax_cli -p '用 agent_swarm 并行总结 src/ 下每个 .v 文件的职责，profile=explore，items=["src/main.v","src/agent.v","src/client.v"]'
+```
+
+子 agent 的工具调用结果会作为 `tool_result` 回填给主 agent；trajectory 文件保留完整执行轨迹便于回放调试。
 
 ## 默认配置
 
@@ -153,6 +168,11 @@ smtp_password=
 smtp_from=
 image_api_url=https://api.minimaxi.com/v1/image_generation
 image_model=image-01
+subagent_max_concurrency=5
+subagent_default_timeout_ms=1800000
+subagent_max_depth=3
+subagent_summary_min_length=200
+subagent_ramp_interval_ms=700
 ```
 
 SMTP 全局配置用于 `send_mail` 工具。配置后，调用邮件工具时可以直接复用这些默认值，只在需要时通过工具参数覆盖。对应环境变量为：

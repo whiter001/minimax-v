@@ -105,5 +105,22 @@ knowledge_sync_mode=balanced
 # 未配置时默认值：空字符串（将使用 smtp_username 的值）。
 # 环境变量：MINIMAX_SMTP_FROM
 # smtp_from=your-email@gmail.com
+
+# === 子 Agent（spawn_subagent / agent_swarm 工具）===
+# 未配置时默认值：5；可配置范围：1-64。
+# 同时跑的子 agent 上限，超过会排队等槽。
+subagent_max_concurrency=5
+# 未配置时默认值：1800000（30 分钟）；可配置范围：1000-86400000 毫秒。
+# 单个子 agent 默认超时；可用 spawn_subagent 工具的 timeout_ms 字段覆盖。
+subagent_default_timeout_ms=1800000
+# 未配置时默认值：3；可配置范围：1-10。
+# 子 agent 嵌套深度上限，防止 spawn 递归失控。
+subagent_max_depth=3
+# 未配置时默认值：200；可配置范围：0-10000。
+# 子 agent 摘要短于此长度时会自动追问一次让它扩写。
+subagent_summary_min_length=200
+# 未配置时默认值：700；可配置范围：0-60000 毫秒。
+# agent_swarm 批量起子 agent 时的启动间隔（ramp）。
+subagent_ramp_interval_ms=700
 # 如果没传的话，默认的发送地址
 # smtp_to=

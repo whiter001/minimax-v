@@ -35,6 +35,24 @@ MiniMax V CLI 是一个使用 V 语言实现的本地 AI Agent 运行时，核�
 - max_tokens: 32768
 - max_rounds: 5000
 - token_limit: 80000
+- subagent_max_concurrency: 5
+- subagent_default_timeout_ms: 1800000
+- subagent_max_depth: 3
+- subagent_summary_min_length: 200
+- subagent_ramp_interval_ms: 700
+
+### Subagent（子 Agent）
+
+`src/subagent.v` 提供"主 agent 调度隔离子 agent"的能力：
+
+- 三个内置 profile：coder（全工具）/ explore（只读）/ plan（只规划），每个有自己的 system_prompt、tools 白名单、max_rounds、max_tokens、timeout_ms
+- `spawn_subagent`（单次）：主 agent 调用后构造一个全新的 `ApiClient` 实例跑完子 agent，把 summary 通过 `tool_result` 回填给主 agent
+- `agent_swarm`（批量）：通过 `prompt_template` + `items[]` 批量展开，按 ramp 间隔（默认 700ms）顺序起子 agent，并发数受 semaphore 控制（默认 5）
+- 上下文完全隔离：每个子 agent 自己有 messages、trajectory、system_prompt；父子不共享状态
+- 安全：子 agent 强制 `silent_mode=true` + `term_ui_enabled=false` 避免污染主 agent 的 TUI
+- 持久化：每个子 agent 的 trajectory 写到 `~/.config/minimax/trajectories/subagent_<exec_id>.json`
+- 续写：子 agent 摘要短于 `subagent_summary_min_length`（默认 200）字符时自动追加一轮 "请扩写" 追问
+- 防递归：`subagent_max_depth`（默认 3）硬上限
 
 ### 3. 请求处理是一个工具循环
 

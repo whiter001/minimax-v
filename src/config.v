@@ -54,6 +54,12 @@ pub mut:
 	smtp_password string
 	smtp_from     string
 	smtp_to       string
+	// Subagent (并行子 agent) 控制
+	subagent_max_concurrency     int // 同时跑的子 agent 上限
+	subagent_default_timeout_ms  int // 单个 sub-agent 默认超时（毫秒）
+	subagent_max_depth           int // sub-agent 嵌套深度上限（防递归）
+	subagent_summary_min_length  int // 子 agent 摘要小于此长度会触发一次续写
+	subagent_ramp_interval_ms    int // 批量起 sub-agent 时的启动间隔（毫秒）
 }
 
 fn default_config() Config {
@@ -87,6 +93,12 @@ fn default_config() Config {
 		smtp_password:          ''
 		smtp_from:              ''
 		smtp_to:                ''
+		// Subagent 默认值
+		subagent_max_concurrency:    5
+		subagent_default_timeout_ms: 1800000 // 30 分钟
+		subagent_max_depth:          3
+		subagent_summary_min_length: 200
+		subagent_ramp_interval_ms:   700
 	}
 }
 
@@ -270,6 +282,41 @@ fn parse_config_content(content string, base Config) Config {
 						}
 					}
 				}
+				'subagent_max_concurrency' {
+					if n := strconv.atoi(val) {
+						if n > 0 && n <= 64 {
+							config.subagent_max_concurrency = n
+						}
+					}
+				}
+				'subagent_default_timeout_ms' {
+					if n := strconv.atoi(val) {
+						if n >= 1000 && n <= 86400000 {
+							config.subagent_default_timeout_ms = n
+						}
+					}
+				}
+				'subagent_max_depth' {
+					if n := strconv.atoi(val) {
+						if n >= 1 && n <= 10 {
+							config.subagent_max_depth = n
+						}
+					}
+				}
+				'subagent_summary_min_length' {
+					if n := strconv.atoi(val) {
+						if n >= 0 && n <= 10000 {
+							config.subagent_summary_min_length = n
+						}
+					}
+				}
+				'subagent_ramp_interval_ms' {
+					if n := strconv.atoi(val) {
+						if n >= 0 && n <= 60000 {
+							config.subagent_ramp_interval_ms = n
+						}
+					}
+				}
 				else {}
 			}
 		}
@@ -368,6 +415,21 @@ fn apply_env_overrides(mut config Config) {
 	}
 	if val := os.getenv_opt('MINIMAX_SMTP_TO') {
 		apply_env_override(mut config, 'MINIMAX_SMTP_TO', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SUBAGENT_MAX_CONCURRENCY') {
+		apply_env_override(mut config, 'MINIMAX_SUBAGENT_MAX_CONCURRENCY', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SUBAGENT_DEFAULT_TIMEOUT_MS') {
+		apply_env_override(mut config, 'MINIMAX_SUBAGENT_DEFAULT_TIMEOUT_MS', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SUBAGENT_MAX_DEPTH') {
+		apply_env_override(mut config, 'MINIMAX_SUBAGENT_MAX_DEPTH', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SUBAGENT_SUMMARY_MIN_LENGTH') {
+		apply_env_override(mut config, 'MINIMAX_SUBAGENT_SUMMARY_MIN_LENGTH', val)
+	}
+	if val := os.getenv_opt('MINIMAX_SUBAGENT_RAMP_INTERVAL_MS') {
+		apply_env_override(mut config, 'MINIMAX_SUBAGENT_RAMP_INTERVAL_MS', val)
 	}
 	if config.auto_skills {
 		config.enable_tools = true
@@ -487,6 +549,41 @@ fn apply_env_override(mut config Config, key string, value string) {
 		}
 		'MINIMAX_SMTP_TO' {
 			config.smtp_to = value
+		}
+		'MINIMAX_SUBAGENT_MAX_CONCURRENCY' {
+			if parsed := strconv.atoi(value) {
+				if parsed > 0 && parsed <= 64 {
+					config.subagent_max_concurrency = parsed
+				}
+			}
+		}
+		'MINIMAX_SUBAGENT_DEFAULT_TIMEOUT_MS' {
+			if parsed := strconv.atoi(value) {
+				if parsed >= 1000 && parsed <= 86400000 {
+					config.subagent_default_timeout_ms = parsed
+				}
+			}
+		}
+		'MINIMAX_SUBAGENT_MAX_DEPTH' {
+			if parsed := strconv.atoi(value) {
+				if parsed >= 1 && parsed <= 10 {
+					config.subagent_max_depth = parsed
+				}
+			}
+		}
+		'MINIMAX_SUBAGENT_SUMMARY_MIN_LENGTH' {
+			if parsed := strconv.atoi(value) {
+				if parsed >= 0 && parsed <= 10000 {
+					config.subagent_summary_min_length = parsed
+				}
+			}
+		}
+		'MINIMAX_SUBAGENT_RAMP_INTERVAL_MS' {
+			if parsed := strconv.atoi(value) {
+				if parsed >= 0 && parsed <= 60000 {
+					config.subagent_ramp_interval_ms = parsed
+				}
+			}
 		}
 		else {}
 	}

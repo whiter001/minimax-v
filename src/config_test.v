@@ -291,3 +291,50 @@ fn test_apply_env_override_supports_smtp_fields() {
 	assert config.smtp_password == 'secret'
 	assert config.smtp_from == 'sender@example.com'
 }
+
+// ===== sub-agent config =====
+
+fn test_default_subagent_config() {
+	cfg := default_config()
+	assert cfg.subagent_max_concurrency == 5
+	assert cfg.subagent_default_timeout_ms == 1800000
+	assert cfg.subagent_max_depth == 3
+	assert cfg.subagent_summary_min_length == 200
+	assert cfg.subagent_ramp_interval_ms == 700
+}
+
+fn test_parse_subagent_config() {
+	content := 'subagent_max_concurrency=2\nsubagent_max_depth=1\nsubagent_ramp_interval_ms=200'
+	cfg := parse_config_content(content, default_config())
+	assert cfg.subagent_max_concurrency == 2
+	assert cfg.subagent_max_depth == 1
+	assert cfg.subagent_ramp_interval_ms == 200
+}
+
+fn test_parse_subagent_config_rejects_invalid() {
+	// concurrency 必须 >0 且 <=64
+	mut cfg := parse_config_content('subagent_max_concurrency=0', default_config())
+	assert cfg.subagent_max_concurrency == 5
+	cfg = parse_config_content('subagent_max_concurrency=99', default_config())
+	assert cfg.subagent_max_concurrency == 5
+	// depth 必须 >=1
+	cfg = parse_config_content('subagent_max_depth=0', default_config())
+	assert cfg.subagent_max_depth == 3
+	// timeout 必须 >=1000
+	cfg = parse_config_content('subagent_default_timeout_ms=500', default_config())
+	assert cfg.subagent_default_timeout_ms == 1800000
+}
+
+fn test_subagent_env_override() {
+	mut cfg := default_config()
+	apply_env_override(mut cfg, 'MINIMAX_SUBAGENT_MAX_CONCURRENCY', '8')
+	apply_env_override(mut cfg, 'MINIMAX_SUBAGENT_DEFAULT_TIMEOUT_MS', '600000')
+	apply_env_override(mut cfg, 'MINIMAX_SUBAGENT_MAX_DEPTH', '5')
+	apply_env_override(mut cfg, 'MINIMAX_SUBAGENT_SUMMARY_MIN_LENGTH', '500')
+	apply_env_override(mut cfg, 'MINIMAX_SUBAGENT_RAMP_INTERVAL_MS', '1500')
+	assert cfg.subagent_max_concurrency == 8
+	assert cfg.subagent_default_timeout_ms == 600000
+	assert cfg.subagent_max_depth == 5
+	assert cfg.subagent_summary_min_length == 500
+	assert cfg.subagent_ramp_interval_ms == 1500
+}

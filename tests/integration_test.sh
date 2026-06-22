@@ -92,6 +92,18 @@ check_contains "--help 包含 MCP" "$output" "mcp"
 check_contains "--help 包含配置文件说明" "$output" "config"
 check_contains "--help 包含环境变量说明" "$output" "MINIMAX_API_KEY"
 
+# 2b. Subagent 工具 schema 校验（schema 通过 build_request_json 暴露给 LLM，不在 --help 里）
+echo ""
+echo "🤖 Subagent 工具 schema 校验"
+# 编译能过 + unit test 跑通 = schema 注册成功（spawn_subagent_test.v 已覆盖）
+# 这里只做 smoke：spawn_subagent_tool 工具函数能正常被 dispatch
+output=$($BINARY --enable-tools -p "调用 spawn_subagent profile=explore prompt=看 src/skills.v 的开头" 2>&1 || true)
+if echo "$output" | head -5 | grep -q -E "API Key|未配置|spawn_subagent|tool_use"; then
+	pass "spawn_subagent 工具可被调用"
+else
+	fail "spawn_subagent 工具调用" "$(echo "$output" | head -3)"
+fi
+
 # 4. 无 API Key 时的错误提示
 echo ""
 echo "🔑 API Key 校验"

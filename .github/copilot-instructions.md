@@ -52,6 +52,14 @@ v test src/config_test.v
    - 支持环境变量覆盖（MINIMAX_API_KEY, MINIMAX_MODEL 等）
    - 跨平台路径展开（`~` 到主目录）
    - 默认值：model=MiniMax-M3, temperature=1.0, max_tokens=32768
+   - Subagent 默认：max_concurrency=5, default_timeout_ms=1800000 (30 分钟), max_depth=3, summary_min_length=200, ramp_interval_ms=700
+
+7. **Subagent 系统 (`subagent.v`)**
+   - `spawn_subagent` / `agent_swarm` 两个工具让主 agent 调度隔离上下文的子 agent
+   - 三种内置 profile：coder（全工具）、explore（只读）、plan（只规划）
+   - 每次 spawn new_api_client() 保证上下文隔离，父子通过 tool_result 摘要沟通
+   - 调度：semaphore 控制并发 + ramp 间隔 + depth 上限防递归
+   - 每个 sub-agent 单独 trajectory 文件到 `~/.config/minimax/trajectories/subagent_<id>.json`
 
 4. **工具系统 (`tools.v`)**
    - 持久化 BashSession 跨工具调用维护工作目录和环境状态
