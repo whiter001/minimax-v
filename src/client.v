@@ -299,6 +299,8 @@ pub mut:
 	plan_mode               bool // Plan mode: draft plan first, execute after user approval
 	silent_mode             bool // suppress console output (used by ACP mode)
 	interactive_mode        bool // true only in REPL mode where ask_user can safely block for input
+	measured_input_tokens   int  // real input tokens reported by the API for the last request
+	measured_msg_chars      int  // total message chars at the time of that measurement
 }
 
 fn new_api_client(config Config) ApiClient {
@@ -335,6 +337,8 @@ fn new_api_client(config Config) ApiClient {
 		phase_status_signature:  ''
 		silent_mode:             false
 		interactive_mode:        false
+		measured_input_tokens:   0
+		measured_msg_chars:      0
 	}
 }
 
@@ -943,6 +947,9 @@ fn tool_phase_message(tool ToolUse) string {
 
 fn (mut c ApiClient) handle_chat_request_retry(mut step AgentStep, mut execution AgentExecution, consecutive_errors int, err_prefix string, err_msg string) !int {
 	mut next_errors := consecutive_errors + 1
+	if is_context_overflow_error(err_msg) {
+		c.observe_context_overflow()
+	}
 	step.state = .error
 	step.error_msg = '${err_prefix}: ${err_msg}'
 	step.end_time = time.now().unix_milli()
@@ -978,8 +985,9 @@ fn build_parsed_response_from_stream_result(sr StreamResult) ParsedResponse {
 	return parsed
 }
 
-fn (c ApiClient) parse_non_streaming_response(response_body string) ParsedResponse {
+fn (mut c ApiClient) parse_non_streaming_response(response_body string) ParsedResponse {
 	parsed := parse_response_full(response_body)
+	c.record_token_usage(response_body)
 	c.log_cache_stats_if_debug(response_body)
 	return parsed
 }
@@ -1500,8 +1508,8 @@ fn (mut c ApiClient) send_streaming_request_opt(body_json string, show_output bo
 	}
 }
 
-// Estimate token count for all messages (rough: ~2.5 chars per token for mixed CJK/English)
-fn (c ApiClient) estimate_tokens() int {
+// total_message_chars sums the characters of the system prompt and all messages.
+fn (c ApiClient) total_message_chars() int {
 	mut total_chars := 0
 	if c.system_prompt.len > 0 {
 		total_chars += c.system_prompt.len
@@ -1513,14 +1521,145 @@ fn (c ApiClient) estimate_tokens() int {
 			total_chars += msg.content.len
 		}
 	}
+	return total_chars
+}
+
+// Estimate token count for all messages. Uses the chars-per-token ratio from the
+// last real API usage measurement when available; falls back to a rough
+// ~2.5 chars per token estimate for mixed CJK/English.
+fn (c ApiClient) estimate_tokens() int {
+	total_chars := c.total_message_chars()
+	if c.measured_input_tokens > 0 && c.measured_msg_chars > 0 {
+		ratio := f64(c.measured_input_tokens) / f64(c.measured_msg_chars)
+		return int(f64(total_chars) * ratio)
+	}
 	return int(f64(total_chars) / 2.5)
+}
+
+// record_token_usage calibrates the token estimator with the real input token
+// count reported by the API for the last request.
+fn (mut c ApiClient) record_token_usage(response_body string) {
+	input_tokens := parse_input_token_usage(response_body)
+	if input_tokens > 0 {
+		c.measured_input_tokens = input_tokens
+		c.measured_msg_chars = c.total_message_chars()
+	}
+}
+
+// build_summary_state_attachment renders todo list, session notes, and the
+// working checkpoint so they survive context summarization.
+fn build_summary_state_attachment() string {
+	mut out := ''
+	todos := load_todo_items()
+	if todos.len > 0 {
+		mut lines := []string{cap: todos.len}
+		for item in todos {
+			lines << '- [${item.status}] #${item.id} ${item.title}'
+		}
+		out += '\n\n[TODO list preserved across summarization]\n' + lines.join('\n')
+	}
+	notes := session_note_read()
+	if notes.len > 0 && notes != '(No session notes yet)'
+		&& notes != '(Session notes file is empty)' {
+		out += '\n\n[Session notes preserved across summarization]\n' +
+			utf8_safe_prefix(notes, 4000)
+	}
+	checkpoint := get_working_checkpoint_context()
+	if checkpoint.len > 0 {
+		out += '\n\n[Working checkpoint preserved across summarization]\n' +
+			utf8_safe_prefix(checkpoint, 4000)
+	}
+	return out
+}
+
+// --- Context overflow self-adaptation ---
+// When the API rejects a request for exceeding the context window, the
+// effective token limit for that model is tightened (persisted per model) so
+// future sessions summarize earlier.
+
+fn model_limits_path() string {
+	return os.join_path(get_user_home_dir(), '.config', 'minimax', 'model_limits.txt')
+}
+
+fn load_model_limit(model string) ?int {
+	content := os.read_file(model_limits_path()) or { return none }
+	for line in content.split('\n') {
+		parts := line.split('\t')
+		if parts.len == 2 && parts[0] == model {
+			return parts[1].int()
+		}
+	}
+	return none
+}
+
+fn save_model_limit(model string, limit int) {
+	path := model_limits_path()
+	os.mkdir_all(os.dir(path)) or {}
+	mut lines := []string{}
+	mut found := false
+	content := os.read_file(path) or { '' }
+	for line in content.split('\n') {
+		if line.trim_space().len == 0 {
+			continue
+		}
+		parts := line.split('\t')
+		if parts.len == 2 && parts[0] == model {
+			lines << '${model}\t${limit}'
+			found = true
+		} else {
+			lines << line
+		}
+	}
+	if !found {
+		lines << '${model}\t${limit}'
+	}
+	os.write_file(path, lines.join('\n') + '\n') or {}
+}
+
+fn is_context_overflow_error(err_msg string) bool {
+	m := err_msg.to_lower()
+	return m.contains('api error 413') || m.contains('prompt is too long')
+		|| m.contains('context_length') || m.contains('too many tokens')
+		|| m.contains('context window')
+}
+
+fn (mut c ApiClient) observe_context_overflow() {
+	estimated := c.estimate_tokens()
+	if estimated <= 0 {
+		return
+	}
+	mut new_limit := int(f64(estimated) * 0.85)
+	if new_limit < 8000 {
+		new_limit = 8000
+	}
+	if current := load_model_limit(c.model) {
+		if new_limit >= current {
+			return
+		}
+	}
+	save_model_limit(c.model, new_limit)
+	if c.token_limit <= 0 || new_limit < c.token_limit {
+		c.token_limit = new_limit
+	}
+	if c.debug && !c.silent_mode {
+		println('[DEBUG] Context overflow observed; effective token limit for ${c.model} lowered to ${new_limit}')
+	}
+	// Compact right away so the upcoming retry fits.
+	c.summarize_context() or {}
 }
 
 // Summarize older messages when context exceeds token limit.
 // Keeps the system prompt, last user message, and recent assistant response.
 // Compresses everything in between into a summary.
 fn (mut c ApiClient) summarize_context() ! {
-	effective_limit := if c.token_limit > 0 { c.token_limit } else { 80000 }
+	mut effective_limit := if c.token_limit > 0 { c.token_limit } else { 80000 }
+	// A previously observed context overflow may have tightened the effective
+	// limit for this model.
+	if model_limit := load_model_limit(c.model) {
+		if model_limit > 0 && model_limit < effective_limit {
+			effective_limit = model_limit
+		}
+	}
 	estimated := c.estimate_tokens()
 	if estimated < effective_limit {
 		return
@@ -1556,12 +1695,14 @@ fn (mut c ApiClient) summarize_context() ! {
 	summary := parse_anthropic_response(response_body)
 
 	if summary.len > 0 {
-		// Replace old messages with a single summary message
+		// Replace old messages with a single summary message. Todo list, session
+		// notes, and the working checkpoint are re-attached so this state
+		// survives summarization.
 		recent := c.messages[old_count..].clone()
 		c.messages.clear()
 		c.messages << ChatMessage{
 			role:    'user'
-			content: '[Context Summary]: ${summary}'
+			content: '[Context Summary]: ${summary}${build_summary_state_attachment()}'
 		}
 		for msg in recent {
 			c.messages << msg
@@ -1583,14 +1724,27 @@ fn (mut c ApiClient) chat(prompt string) !string {
 
 	// Simple mode (no tools)
 	if !c.enable_tools {
+		c.summarize_context() or {}
 		body_json := c.build_request_json()
 		c.logger.log_request(c.model, c.messages.len, false, c.use_streaming)
 		if c.use_streaming {
-			sr := c.send_streaming_request(body_json)!
+			sr := c.send_streaming_request(body_json) or {
+				if is_context_overflow_error(err.str()) {
+					c.observe_context_overflow()
+				}
+				return err
+			}
+			c.record_token_usage(sr.raw_body)
 			c.add_message('assistant', sr.text)
 			return sr.text
 		}
-		response_body := c.send_api_request(body_json)!
+		response_body := c.send_api_request(body_json) or {
+			if is_context_overflow_error(err.str()) {
+				c.observe_context_overflow()
+			}
+			return err
+		}
+		c.record_token_usage(response_body)
 		full_response := c.parse_text_response(response_body)
 		c.add_message('assistant', full_response)
 		return full_response
@@ -1702,6 +1856,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 				parsed = c.parse_non_streaming_response(response_body)
 			} else {
 				parsed = build_parsed_response_from_stream_result(sr)
+				c.record_token_usage(sr.raw_body)
 				if force_stream && parsed.stop_reason.len == 0 && parsed.text.len == 0
 					&& parsed.tool_uses.len == 0 {
 					if c.debug && !c.silent_mode {

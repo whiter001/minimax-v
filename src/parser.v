@@ -70,6 +70,29 @@ fn parse_cache_stats(body string) (int, int) {
 	return cache_read, cache_creation
 }
 
+// parse_input_token_usage extracts total input token usage (plain + cache read +
+// cache creation) from an Anthropic API response body or an accumulated SSE
+// stream. Returns 0 if no usage fields are present.
+fn parse_input_token_usage(body string) int {
+	mut total := 0
+	for field in ['"input_tokens":', '"cache_read_input_tokens":', '"cache_creation_input_tokens":'] {
+		if idx := body.index(field) {
+			mut p := idx + field.len
+			for p < body.len && body[p] == ` ` {
+				p++
+			}
+			mut e := p
+			for e < body.len && body[e] >= `0` && body[e] <= `9` {
+				e++
+			}
+			if e > p {
+				total += body[p..e].int()
+			}
+		}
+	}
+	return total
+}
+
 // --- Full Response Parsing (with tool_use support) ---
 
 pub struct ParsedResponse {

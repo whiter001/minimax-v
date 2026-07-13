@@ -1,6 +1,7 @@
 module main
 
 import os
+import time
 
 // ===== estimate_tokens =====
 
@@ -651,4 +652,105 @@ fn test_build_request_json_includes_working_checkpoint() {
 	json := client.build_request_json()
 	assert json.contains('Working checkpoint')
 	assert json.contains('Remember constraints')
+}
+
+// ===== token usage calibration =====
+
+fn test_parse_input_token_usage() {
+	body := '{"usage":{"input_tokens":1200,"cache_read_input_tokens":800,"cache_creation_input_tokens":100,"output_tokens":50}}'
+	assert parse_input_token_usage(body) == 2100
+	assert parse_input_token_usage('{"usage":{"input_tokens":42}}') == 42
+	assert parse_input_token_usage('{"no_usage":true}') == 0
+}
+
+fn test_estimate_tokens_calibrated_by_usage() {
+	mut client := new_api_client(default_config())
+	client.add_message('user', 'a'.repeat(1000))
+	// No measurement yet: falls back to chars / 2.5
+	assert client.estimate_tokens() == 400
+	// Simulate an API measurement: 500 tokens for 1000 chars (2 chars/token)
+	client.measured_input_tokens = 500
+	client.measured_msg_chars = 1000
+	assert client.estimate_tokens() == 500
+	// After the conversation grows to 2000 chars the ratio is reused
+	client.add_message('assistant', 'b'.repeat(1000))
+	assert client.estimate_tokens() == 1000
+}
+
+fn test_record_token_usage() {
+	mut client := new_api_client(default_config())
+	client.add_message('user', 'hello')
+	client.record_token_usage('{"usage":{"input_tokens":300,"output_tokens":10}}')
+	assert client.measured_input_tokens == 300
+	assert client.measured_msg_chars == client.total_message_chars()
+	client.record_token_usage('{"irrelevant":true}')
+	assert client.measured_input_tokens == 300
+}
+
+// ===== context overflow adaptation =====
+
+fn test_is_context_overflow_error() {
+	assert is_context_overflow_error('API Error 413: request entity too large')
+	assert is_context_overflow_error('API Error 400: prompt is too long: 210000 tokens > 200000 maximum')
+	assert is_context_overflow_error('request exceeds the context window')
+	assert !is_context_overflow_error('API Error 400: invalid params')
+	assert !is_context_overflow_error('curl fallback failed: connection refused')
+}
+
+fn test_model_limit_roundtrip() {
+	model := 'test-model-roundtrip-${time.now().unix_milli()}'
+	assert load_model_limit(model) == none
+	save_model_limit(model, 12345)
+	assert load_model_limit(model) or { 0 } == 12345
+	save_model_limit(model, 6789)
+	assert load_model_limit(model) or { 0 } == 6789
+	// Clean up the entry
+	path := model_limits_path()
+	content := os.read_file(path) or { '' }
+	mut kept := []string{}
+	for line in content.split('\n') {
+		if line.len > 0 && !line.starts_with('${model}\t') {
+			kept << line
+		}
+	}
+	os.write_file(path, kept.join('\n')) or {}
+	assert load_model_limit(model) == none
+}
+
+fn test_observe_context_overflow_tightens_limit() {
+	mut config := default_config()
+	config.token_limit = 100000
+	mut client := new_api_client(config)
+	client.add_message('user', 'x'.repeat(250000)) // estimate ~100000 tokens
+	client.observe_context_overflow()
+	// 0.85 * 100000 = 85000
+	assert client.token_limit == 85000
+	assert load_model_limit(config.model) or { 0 } == 85000
+	// A second observation at a lower estimate tightens further
+	client.messages.clear()
+	client.add_message('user', 'x'.repeat(100000)) // ~40000 tokens
+	client.observe_context_overflow()
+	assert load_model_limit(config.model) or { 0 } == 34000
+	// Restore: remove the persisted limit for this model
+	path := model_limits_path()
+	content := os.read_file(path) or { '' }
+	mut kept := []string{}
+	for line in content.split('\n') {
+		if line.len > 0 && !line.starts_with('${config.model}\t') {
+			kept << line
+		}
+	}
+	os.write_file(path, kept.join('\n')) or {}
+}
+
+// ===== summary state attachment =====
+
+fn test_build_summary_state_attachment_includes_todos() {
+	todo_manager_tool('clear', '', 0, '', '')
+	todo_manager_tool('add', '', 0, 'attachment-test-task', 'pending')
+	attachment := build_summary_state_attachment()
+	assert attachment.contains('[TODO list preserved across summarization]')
+	assert attachment.contains('attachment-test-task')
+	todo_manager_tool('clear', '', 0, '', '')
+	assert build_summary_state_attachment().contains('TODO list') == false
 }
