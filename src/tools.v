@@ -4573,13 +4573,110 @@ fn get_tools_schema_json() string {
 	return '[' + parts.join(',') + ']'
 }
 
+// --- Tool result truncation ---
+// Large tool outputs are truncated to protect the model context window.
+// Oversized results are persisted to ~/.config/minimax/tool_outputs/ and the
+// model only sees a preview plus the spill path for paging.
+
+const tool_result_max_chars = 50000
+const tool_result_max_line_chars = 2000
+const tool_result_preview_chars = 2000
+const tool_output_max_age_secs = 7 * 24 * 3600
+
+// utf8_safe_prefix cuts s at max bytes without splitting a multi-byte rune.
+fn utf8_safe_prefix(s string, max int) string {
+	if s.len <= max {
+		return s
+	}
+	mut end := max
+	for end > 0 && (s[end] & 0xc0) == 0x80 {
+		end--
+	}
+	return s[..end]
+}
+
+// truncate_long_lines caps every line at max_line bytes, marking the cut.
+fn truncate_long_lines(s string, max_line int) string {
+	lines := s.split('\n')
+	mut out := []string{cap: lines.len}
+	for line in lines {
+		if line.len > max_line {
+			cut := utf8_safe_prefix(line, max_line)
+			out << cut + '\n[...truncated ${line.len - cut.len} chars in this line...]'
+		} else {
+			out << line
+		}
+	}
+	return out.join('\n')
+}
+
+fn cleanup_old_tool_outputs(dir string) {
+	entries := os.ls(dir) or { return }
+	cutoff := time.now().unix() - tool_output_max_age_secs
+	for entry in entries {
+		path := os.join_path(dir, entry)
+		if os.file_last_mod_unix(path) < cutoff {
+			os.rm(path) or {}
+		}
+	}
+}
+
+// spill_tool_output persists a full tool result and returns the spill path
+// (empty string on failure).
+fn spill_tool_output(tool_name string, content string) string {
+	dir := os.join_path(get_user_home_dir(), '.config', 'minimax', 'tool_outputs')
+	os.mkdir_all(dir) or { return '' }
+	cleanup_old_tool_outputs(dir)
+	safe_name := tool_name.replace_each(['/', '_', '\\', '_', ':', '_'])
+	path := os.join_path(dir, 'tool_output_${safe_name}_${time.now().unix_milli()}.log')
+	os.write_file(path, content) or { return '' }
+	return path
+}
+
+// truncate_tool_result applies the per-line and total caps to a tool result.
+// Total overflow spills the full original result to disk and returns a short
+// preview with the spill path; line overflow is rewritten in place.
+fn truncate_tool_result(tool_name string, result string) string {
+	if result.len > tool_result_max_chars {
+		spill_path := spill_tool_output(tool_name, result)
+		preview := utf8_safe_prefix(result, tool_result_preview_chars)
+		mut note := '\n[...truncated: full output is ${result.len} bytes'
+		if spill_path.len > 0 {
+			note += ', saved to ${spill_path} (page through it with str_replace_editor view + view_range, or search it with grep_search)'
+		} else {
+			note += ' (failed to persist full output)'
+		}
+		note += '...]'
+		return preview + note
+	}
+	if result.len > tool_result_max_line_chars {
+		mut has_long_line := false
+		for line in result.split('\n') {
+			if line.len > tool_result_max_line_chars {
+				has_long_line = true
+				break
+			}
+		}
+		if has_long_line {
+			return truncate_long_lines(result, tool_result_max_line_chars)
+		}
+	}
+	return result
+}
+
+fn execute_tool_use_in_workspace(mut bash_session BashSession, tool ToolUse, workspace string, config Config, acp_mode bool, term_ui_enabled bool, term_ui_app &TermUiApp) string {
+	result := execute_tool_use_in_workspace_inner(mut bash_session, tool, workspace, config,
+		acp_mode, term_ui_enabled, term_ui_app)
+	return truncate_tool_result(tool.name, result)
+}
+
 fn execute_tool_use(tool ToolUse) string {
 	mut bash_session := new_bash_session('')
 	return execute_tool_use_in_workspace(mut bash_session, tool, '', default_config(), false,
 		false, unsafe { nil })
 }
 
-fn execute_tool_use_in_workspace(mut bash_session BashSession, tool ToolUse, workspace string, config Config, acp_mode bool, term_ui_enabled bool, term_ui_app &TermUiApp) string {
+fn execute_tool_use_in_workspace_inner(mut bash_session BashSession, tool ToolUse, workspace string, config Config, acp_mode bool, term_ui_enabled bool, term_ui_app &TermUiApp) string {
 	match tool.name {
 		'str_replace_editor' {
 			cmd := tool.input['command'] or { '' }
@@ -4817,7 +4914,8 @@ fn build_mcp_args_json(input map[string]string) string {
 
 fn execute_tool_use_with_mcp(mut mcp McpManager, mut bash_session BashSession, tool ToolUse, workspace string, config Config, acp_mode bool, term_ui_enabled bool, term_ui_app &TermUiApp) string {
 	if tool.name == 'screen_analyze' {
-		return screen_analyze_tool_with_mcp(mut mcp, tool.input, workspace, config)
+		return truncate_tool_result(tool.name, screen_analyze_tool_with_mcp(mut mcp, tool.input,
+			workspace, config))
 	}
 
 	// Try builtin tools first
@@ -4836,5 +4934,5 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, mut bash_session BashSession, t
 	args_json := build_mcp_args_json(tool.input)
 
 	result := mcp.call_tool(tool.name, args_json) or { return 'Error: ${err.msg()}' }
-	return result
+	return truncate_tool_result(tool.name, result)
 }

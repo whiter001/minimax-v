@@ -1447,3 +1447,43 @@ fn test_execute_tool_use_task_done() {
 	assert result.starts_with('__TASK_DONE__:')
 	assert result.contains('All tasks completed')
 }
+
+// ===== tool result truncation =====
+
+fn test_truncate_tool_result_short_unchanged() {
+	assert truncate_tool_result('bash', 'hello world') == 'hello world'
+	assert truncate_tool_result('bash', '') == ''
+}
+
+fn test_truncate_tool_result_long_line() {
+	long_line := 'x'.repeat(3000)
+	result := truncate_tool_result('bash', 'first\n${long_line}\nlast')
+	assert result.contains('first')
+	assert result.contains('last')
+	assert result.contains('[...truncated 1000 chars in this line...]')
+	assert !result.contains(long_line)
+}
+
+fn test_truncate_tool_result_cjk_boundary() {
+	// Each 中 is 3 bytes; the cut at 2000 must back off to a rune boundary (1998).
+	line := '中'.repeat(1000)
+	result := truncate_tool_result('bash', line)
+	assert result.contains('[...truncated 1002 chars in this line...]')
+	assert !result.contains(line)
+}
+
+fn test_truncate_tool_result_total_spill() {
+	big := 'y'.repeat(60000)
+	result := truncate_tool_result('grep_search', big)
+	assert result.len < 60000
+	assert result.contains('truncated: full output is 60000 bytes')
+	assert result.contains('saved to ')
+	spill_path := result.all_after('saved to ').all_before(' (page')
+	assert os.is_file(spill_path)
+	content := os.read_file(spill_path) or {
+		assert false, 'failed to read spill file: ${err.msg()}'
+		return
+	}
+	assert content == big
+	os.rm(spill_path) or {}
+}
