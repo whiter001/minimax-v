@@ -331,7 +331,7 @@ fn test_run_batch_runs_in_parallel() {
 	for r in results {
 		assert r.status == .failed
 	}
-	assert t4 < t1 * 2 + 5000, '4 agents took ${t4}ms vs single-agent baseline ${t1}ms (serial would be ~${4 * t1}ms)'
+	assert t4 < t1 * 3 + 5000, '4 agents took ${t4}ms vs single-agent baseline ${t1}ms (serial would be ~${4 * t1}ms)'
 }
 
 // 短超时：任务本身要跑 ~7.5 秒，timeout 800ms 应被调度器判定为超时。

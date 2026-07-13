@@ -207,6 +207,45 @@ SOP 还支持以下查看命令：
 - `auto_upgrade_sops=true|false`
 - `knowledge_sync_mode=concise|balanced|strict`
 
+## Hooks
+
+### 作用
+
+Hooks 让用户不改源码就能在关键事件点插入自定义 shell 命令，主要用途是安全护栏（阻断危险工具调用）和自动化审计。
+
+### 配置位置
+
+- ~/.config/minimax/hooks.json（文件不存在则钩子全部禁用）
+
+### 示例配置
+
+```json
+{
+  "hooks": [
+    {"event": "PreToolUse", "matcher": "bash", "command": "echo denied >&2; exit 2", "timeout": 10},
+    {"event": "PostToolUse", "command": "cat \"$MINIMAX_HOOK_INPUT\" >> ~/hook_audit.log"}
+  ]
+}
+```
+
+### 事件清单
+
+- 可阻断（退出码 2 = deny，stderr 作为原因）：`UserPromptSubmit`（匹配用户输入文本）、`PreToolUse`（匹配工具名）、`Stop`（模型即将结束任务，每次任务最多被拦回一次）。
+- 通知型（结果忽略）：`PostToolUse`、`PostToolUseFailure`（匹配工具名）、`SessionStart`（source=startup）、`SessionEnd`（reason=exit/interrupt）、`PreCompact`/`PostCompact`（trigger=auto）。
+
+### 执行协议
+
+- 命令通过 bash `-c` 执行，cwd 为启动目录，默认超时 30 秒（可配 1-600）。
+- payload JSON 写入临时文件，路径经环境变量 `MINIMAX_HOOK_INPUT` 传入（不走 stdin：V 的 os.Process 无法关闭子进程 stdin）。
+- 基础字段：`hook_event_name`、`session_id`、`cwd`；工具事件附加 `tool_name`、`tool_call_id`、`tool_input`（输出/错误截断到 2000 字符）。
+- fail-open：除退出码 2 外（非零退出、超时、命令不存在、配置损坏）一律放行，钩子故障不影响主流程。
+- 超时只 kill hook 进程组；若 hook fork 出持有管道的孙进程，输出读取采用非阻塞 drain（最多 ~200ms 宽限），不会被拖住。
+
+### 实现位置
+
+- [src/hooks.v](../src/hooks.v)：配置加载、匹配、执行器、阻断聚合。
+- 触发点：[src/client.v](../src/client.v)（chat 入口、execute_tool_batch、Stop、PreCompact/PostCompact）、[src/main.v](../src/main.v)（SessionStart/SessionEnd）。
+
 ## 文档更新原则
 
 扩展能力一旦变更，应至少同步以下文档：

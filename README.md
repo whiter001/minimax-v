@@ -125,6 +125,26 @@ v -g -o minimax_cli src/
 - Experience：把经验记录到本地知识库，并自动写回全局 skill 与全局 SOP。
 - Cron：本地定时任务子命令，支持 `cron dashboard` 本地页面查看任务与执行记录。
 - Subagent（子 Agent）：主 agent 可以通过 `spawn_subagent` 单次起子 agent，或通过 `agent_swarm` 批量并行起多个子 agent。三种内置 profile（`coder` 全工具、`explore` 只读、`plan` 只规划）。每个子 agent 上下文完全隔离，跑完后把摘要回填给主 agent，trajectory 单独存到 `~/.config/minimax/trajectories/subagent_<id>.json`。并发数、超时、嵌套深度、ramp 间隔都可配。
+- Hooks（用户自定义钩子）：在 `~/.config/minimax/hooks.json` 里声明 shell 命令，在工具执行、会话起止、上下文压缩等事件点触发；`PreToolUse` / `UserPromptSubmit` / `Stop` 可阻断（退出码 2 = deny），适合做安全护栏和自动化。
+
+### Hooks 用法
+
+配置文件 `~/.config/minimax/hooks.json`（不存在则钩子全部禁用）：
+
+```json
+{
+  "hooks": [
+    {"event": "PreToolUse", "matcher": "bash", "command": "echo 'bash 被护栏禁止' >&2; exit 2", "timeout": 10},
+    {"event": "PostToolUse", "command": "cat \"$MINIMAX_HOOK_INPUT\" >> ~/.config/minimax/hook_audit.log", "timeout": 10}
+  ]
+}
+```
+
+- `event`：支持 `UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`PostToolUseFailure`、`Stop`、`SessionStart`、`SessionEnd`、`PreCompact`、`PostCompact`。
+- `matcher`：可选，对事件的匹配值做区分大小写的子串匹配（`PreToolUse`/`PostToolUse` 匹配工具名，`UserPromptSubmit` 匹配输入文本）；省略则全匹配。
+- `command`：通过 bash 执行的命令。事件 payload（JSON，含 `hook_event_name`/`session_id`/`cwd` 及事件特有字段如 `tool_name`/`tool_input`）写入临时文件，路径通过环境变量 `MINIMAX_HOOK_INPUT` 传入。
+- `timeout`：可选，秒，默认 30，上限 600。
+- 阻断语义：仅 `UserPromptSubmit` / `PreToolUse` / `Stop` 可阻断——退出码 2 表示 deny，stderr 内容作为原因回传给模型；其他退出码、超时、命令不存在一律 fail-open（放行），避免钩子故障卡死主流程。
 
 ### Subagent 用法
 

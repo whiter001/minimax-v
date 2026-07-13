@@ -91,7 +91,7 @@ v fmt -w src/xxx.v
 
 ### Markdown
 
-仓库约定优先使用 oxfmt 处理 Markdown；如果环境没有该命令，可以先保持手工格式稳定，再按需要补装。
+仓库约定优先使用 oxfmt 处理 Markdown；`format_all.sh` 会先探测当前 oxfmt 的能力（旧版 `--write`、新版就地写入），oxc oxfmt 0.15+ 已不支持 Markdown 时会自动跳过。如果环境没有该命令或版本不支持，保持手工格式稳定即可。
 
 ## 测试
 

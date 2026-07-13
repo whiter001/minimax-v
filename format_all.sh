@@ -53,8 +53,28 @@ else
 fi
 
 if [ "${#md_files[@]}" -gt 0 ]; then
-	echo "📝 Formatting Markdown files..."
-	"$oxfmt_bin" --write "${md_files[@]}"
+	# oxfmt 的 Markdown 支持随版本变化：旧版需要 --write，oxc oxfmt 0.15+
+	# 改为默认就地写入但不再支持 Markdown。先探测当前二进制的实际能力。
+	md_fmt_mode=""
+	probe_dir="$(mktemp -d)"
+	probe_file="$probe_dir/probe.md"
+	printf '# Title\n' >"$probe_file"
+	if "$oxfmt_bin" --write "$probe_file" >/dev/null 2>&1; then
+		md_fmt_mode="--write"
+	elif probe_out="$("$oxfmt_bin" "$probe_file" 2>&1)" && ! grep -q "Expected at least one target file" <<<"$probe_out"; then
+		md_fmt_mode="inplace"
+	fi
+	rm -rf "$probe_dir"
+
+	if [ "$md_fmt_mode" = "--write" ]; then
+		echo "📝 Formatting Markdown files (oxfmt --write)..."
+		"$oxfmt_bin" --write "${md_files[@]}"
+	elif [ "$md_fmt_mode" = "inplace" ]; then
+		echo "📝 Formatting Markdown files (oxfmt in-place)..."
+		"$oxfmt_bin" "${md_files[@]}"
+	else
+		echo "⚠️ 当前 oxfmt 不支持 Markdown（如 oxc oxfmt 0.15+ 仅支持 JS/TS），跳过 Markdown 格式化。"
+	fi
 else
 	echo "ℹ️ No Markdown files found."
 fi

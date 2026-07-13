@@ -26,7 +26,7 @@
 
 - 构建、测试、运行直接使用 `v` 即可。
 - 修改 .v 文件后立刻执行 `v fmt -w` 对应文件。
-- 修改 .md 文件后立刻执行 `oxfmt --write` 对应文件。
+- 修改 .md 文件后执行 `./format_all.sh` 格式化（内部按 oxfmt 版本自动选择 `--write` 或就地写入；oxc oxfmt 0.15+ 不支持 Markdown 时会跳过，保持手工格式即可）。
 - 不引入外部运行时依赖来替代现有标准库实现，除非任务明确要求。
 - 这是单二进制 CLI，不要假设存在服务端常驻进程架构。
 - 涉及帮助文本、默认值、命令名变更时，同时更新 README 和 docs。
@@ -78,6 +78,8 @@ v test src/config_test.v
 - [src/experience.v](src/experience.v)：经验库与技能同步。
 - [src/term_ui.v](src/term_ui.v)：终端 UI。
 - [src/acp.v](src/acp.v)：ACP server。
+- [src/hooks.v](src/hooks.v)：用户自定义钩子（hooks.json 加载、事件匹配、bash 执行器、PreToolUse 等阻断语义）。
+- [src/bg_tasks.v](src/bg_tasks.v)：后台任务系统（run_in_background、task_list/task_output/task_stop）。
 
 ## 代码风格
 

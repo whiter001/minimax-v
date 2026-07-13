@@ -110,6 +110,9 @@ fn main() {
 		if client.runtime_mark_shutting_down() {
 			exit(130)
 		}
+		client.hooks.trigger('SessionEnd', 'exit', {
+			'reason': 'interrupt'
+		})
 		client.runtime_stop_all_mcp()
 		if !client.runtime_is_acp_mode() {
 			println('\n👋 已中断')
@@ -160,6 +163,9 @@ fn main() {
 	}
 
 	client.logger.log_session_start(version, client.model)
+	client.hooks.trigger('SessionStart', 'startup', {
+		'source': 'startup'
+	})
 
 	mut exit_code := 0
 	if is_interactive {
@@ -177,6 +183,9 @@ fn main() {
 	}
 
 	client.logger.log_session_end()
+	client.hooks.trigger('SessionEnd', 'exit', {
+		'reason': 'exit'
+	})
 
 	// Cleanup MCP (always safe to call, even if only builtin was registered)
 	client.runtime_stop_all_mcp()

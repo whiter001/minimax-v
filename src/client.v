@@ -301,6 +301,7 @@ pub mut:
 	interactive_mode        bool // true only in REPL mode where ask_user can safely block for input
 	measured_input_tokens   int  // real input tokens reported by the API for the last request
 	measured_msg_chars      int  // total message chars at the time of that measurement
+	hooks                   HookEngine
 }
 
 fn new_api_client(config Config) ApiClient {
@@ -339,6 +340,7 @@ fn new_api_client(config Config) ApiClient {
 		interactive_mode:        false
 		measured_input_tokens:   0
 		measured_msg_chars:      0
+		hooks:                   new_hook_engine(config.debug)
 	}
 }
 
@@ -1093,8 +1095,39 @@ fn (mut c ApiClient) execute_tool_batch(mut step AgentStep, tool_round int, tool
 			raw_result = 'Error: 检测到相同的 bash 失败命令已连续重复，已阻止再次执行。请先修改命令、检查路径或权限，或改用其他工具。'
 			c.logger.log('WARN', 'TOOL_GUARD', 'blocked repeated failed bash command')
 		} else {
-			raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, mut c.bash_session, tu,
-				c.workspace, c.config, c.acp_mode, c.term_ui_enabled, c.term_ui_app)
+			hook_blocked, hook_reason := c.hooks.trigger_block('PreToolUse', tu.name, {
+				'tool_name':    tu.name
+				'tool_call_id': tu.id
+				'tool_input':   build_tool_input_json(tu.input)
+			})
+			if hook_blocked {
+				raw_result = 'Error: 工具调用被 PreToolUse hook 阻止: ${hook_reason}'
+				c.logger.log('WARN', 'HOOK', 'PreToolUse blocked ${tu.name}: ${hook_reason}')
+				if !c.silent_mode {
+					println('\x1b[33m🪝 PreToolUse hook 阻止了 ${tu.name}: ${hook_reason}\x1b[0m')
+				}
+			} else {
+				raw_result = execute_tool_use_with_mcp(mut c.mcp_manager, mut c.bash_session, tu,
+					c.workspace, c.config, c.acp_mode, c.term_ui_enabled, c.term_ui_app)
+			}
+		}
+		// Notification hooks: fire after execution (or block), result ignored.
+		if c.hooks.enabled() {
+			if is_tool_error_result(raw_result) {
+				c.hooks.trigger('PostToolUseFailure', tu.name, {
+					'tool_name':    tu.name
+					'tool_call_id': tu.id
+					'tool_input':   build_tool_input_json(tu.input)
+					'error':        truncate_hook_preview(raw_result, 2000)
+				})
+			} else {
+				c.hooks.trigger('PostToolUse', tu.name, {
+					'tool_name':    tu.name
+					'tool_call_id': tu.id
+					'tool_input':   build_tool_input_json(tu.input)
+					'tool_output':  truncate_hook_preview(raw_result, 2000)
+				})
+			}
 		}
 		if tu.name == 'activate_skill' && !is_tool_error_result(raw_result) {
 			activated := (tu.input['name'] or { '' }).trim_space()
@@ -1687,6 +1720,11 @@ fn (mut c ApiClient) summarize_context() ! {
 	// Use a compact summarization prompt
 	summarize_prompt := '请将以下对话历史压缩为简洁的摘要，保留关键信息（工具调用结果、重要决策、文件路径等）。只输出摘要文本，不要添加额外说明：\n\n${summary_input}'
 
+	c.hooks.trigger('PreCompact', 'auto', {
+		'trigger':     'auto'
+		'token_count': estimated.str()
+	})
+
 	// Build a minimal request for summarization
 	escaped := escape_json_string(summarize_prompt)
 	body_json := '{"model":"${c.model}","max_tokens":2000,"temperature":0.3,"messages":[{"role":"user","content":"${escaped}"}]}'
@@ -1715,10 +1753,20 @@ fn (mut c ApiClient) summarize_context() ! {
 		if !c.silent_mode {
 			println('\x1b[2m[Context auto-summarized: ${old_count} messages compressed]\x1b[0m')
 		}
+		c.hooks.trigger('PostCompact', 'auto', {
+			'trigger':               'auto'
+			'estimated_token_count': c.estimate_tokens().str()
+		})
 	}
 }
 
 fn (mut c ApiClient) chat(prompt string) !string {
+	prompt_blocked, prompt_block_reason := c.hooks.trigger_block('UserPromptSubmit', prompt, {
+		'prompt': truncate_hook_preview(prompt, 2000)
+	})
+	if prompt_blocked {
+		return error('prompt blocked by UserPromptSubmit hook: ${prompt_block_reason}')
+	}
 	c.add_message('user', prompt)
 	c.logger.log_user_prompt(prompt)
 
@@ -1756,6 +1804,7 @@ fn (mut c ApiClient) chat(prompt string) !string {
 	mut consecutive_errors := 0
 	mut consecutive_tool_failure_rounds := 0
 	mut max_rounds_asked_user := false
+	mut stop_hook_active := false
 	mut last_failed_tool_batch_signature := ''
 	mut failed_tool_batch_streak := 0
 	mut last_failed_bash_command := ''
@@ -2045,6 +2094,17 @@ fn (mut c ApiClient) chat(prompt string) !string {
 		}
 
 		// Normal completion — if AI returned empty text after tool use, provide fallback summary
+		// Stop hook: a hook may block ending the turn once per task; the reason is
+		// fed back to the model so it can continue working.
+		stop_blocked, stop_reason := c.hooks.trigger_block('Stop', '', {
+			'stop_hook_active': stop_hook_active.str()
+		})
+		if stop_blocked && !stop_hook_active {
+			stop_hook_active = true
+			c.add_message('user',
+				'SYSTEM: Stop hook 阻止了本次任务结束，原因: ${stop_reason}。请继续处理后再给出最终回答。')
+			continue
+		}
 		final_text := if parsed.text.len == 0 && execution.steps.len > 0 {
 			// Collect what tools were called as context for fallback message
 			mut tool_summary := []string{}
