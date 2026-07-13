@@ -4924,7 +4924,7 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, mut bash_session BashSession, t
 		'record_experience', 'session_note', 'task_done', 'grep_search', 'find_files',
 		'sequentialthinking', 'json_edit', 'ask_user', 'update_working_checkpoint', 'todo_manager',
 		'read_many_files', 'activate_skill', 'cron', 'list_files', 'generate_image',
-		'generate_speech', 'send_mail']
+		'generate_speech', 'send_mail', 'spawn_subagent', 'agent_swarm']
 	if tool.name in builtin_names {
 		return execute_tool_use_in_workspace(mut bash_session, tool, workspace, config, acp_mode,
 			term_ui_enabled, term_ui_app)

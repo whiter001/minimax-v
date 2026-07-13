@@ -8,7 +8,8 @@ import time
 // 设计要点：
 // 1. 每次 spawn 都 new_api_client() 一个全新实例，保证上下文隔离；
 // 2. 父子 agent 通过 tool_result 回填摘要沟通，父 agent 看不到子 agent 的全量消息；
-// 3. 调度器用 semaphore 控制并发 + ramp 间隔 + 超时取消；
+// 3. 每个子 agent 跑在独立 OS 线程，channel semaphore 限并发 + ramp 错峰启动，
+//    超时由调度器按「开始时间 + timeout」判定（超时线程变孤儿，结果被丢弃）；
 // 4. 每个子 agent 单独写一个 trajectory 文件到 ~/.config/minimax/trajectories/subagent_<id>.json；
 // 5. 子 agent 摘要 < config.subagent_summary_min_length 自动续写一次。
 
@@ -156,7 +157,6 @@ pub mut:
 	config          Config
 	trajectory_dir  string
 	next_exec_id    int = 1
-	semaphore       chan int
 	active_children map[string]SubagentHandle
 }
 
@@ -168,12 +168,10 @@ pub mut:
 }
 
 pub fn new_subagent_host(config Config, trajectory_dir string) SubagentHost {
-	max_conc := if config.subagent_max_concurrency > 0 { config.subagent_max_concurrency } else { 5 }
 	return SubagentHost{
 		config:          config
 		trajectory_dir:  trajectory_dir
 		next_exec_id:    1
-		semaphore:       chan int{cap: max_conc}
 		active_children: map[string]SubagentHandle{}
 	}
 }
@@ -193,10 +191,11 @@ fn (mut host SubagentHost) next_exec_id() string {
 	return 'subagent_${id}_${time.now().custom_format('YYYYMMDD_hhmmss')}'
 }
 
-// 解析 spec，应用 profile 默认值与 config 默认值，返回 effective 子配置
-fn (mut host SubagentHost) resolve_subagent_config(spec SubagentSpec) (Config, SubagentProfile) {
+// 解析 spec，应用 profile 默认值与 config 默认值，返回 effective 子配置。
+// 纯函数：输入按值传递，goroutine 安全。
+fn resolve_subagent_config(base Config, spec SubagentSpec) (Config, SubagentProfile) {
 	profile := subagent_profile(spec.profile)
-	mut cfg := host.config
+	mut cfg := base
 
 	// 子 agent 强制 disable enable_tools（除非 caller 通过 spec 强制开启）
 	// explore/plan profile 已经把 enable_tools 限制在白名单子集，由 tools 层去过滤
@@ -212,19 +211,19 @@ fn (mut host SubagentHost) resolve_subagent_config(spec SubagentSpec) (Config, S
 		sys += '\n\n[主 agent 追加的指令]\n${cfg.system_prompt}'
 	}
 	// 标记深度，防止递归
-	sys += '\n\n[元信息] 当前是第 ${spec.depth} 层子 agent，最大允许深度 ${host.config.subagent_max_depth}。请勿再调用 spawn_subagent 超出此深度。'
+	sys += '\n\n[元信息] 当前是第 ${spec.depth} 层子 agent，最大允许深度 ${base.subagent_max_depth}。请勿再调用 spawn_subagent 超出此深度。'
 	cfg.system_prompt = sys
 
 	return cfg, profile
 }
 
 // 构造子 agent 的 trajectory 路径
-fn (mut host SubagentHost) trajectory_path_for(exec_id string) string {
-	return os.join_path(host.trajectory_dir, '${exec_id}.json')
+fn subagent_trajectory_path(trajectory_dir string, exec_id string) string {
+	return os.join_path(trajectory_dir, '${exec_id}.json')
 }
 
-// 跑单个子 agent（不包含超时，由 caller 包装）
-fn spawn_one_inner(mut host SubagentHost, spec SubagentSpec, exec_id string) SubagentResult {
+// 跑单个子 agent。所有输入按值传递，不共享可变状态，可在独立线程中安全运行。
+fn spawn_one_isolated(config Config, trajectory_dir string, spec SubagentSpec, exec_id string) SubagentResult {
 	start_ms := time.now().unix_milli()
 	mut result := SubagentResult{
 		exec_id: exec_id
@@ -233,14 +232,14 @@ fn spawn_one_inner(mut host SubagentHost, spec SubagentSpec, exec_id string) Sub
 	}
 
 	// depth 检查
-	if spec.depth > host.config.subagent_max_depth {
+	if spec.depth > config.subagent_max_depth {
 		result.status = .failed
-		result.error = 'subagent depth ${spec.depth} exceeds max ${host.config.subagent_max_depth}'
+		result.error = 'subagent depth ${spec.depth} exceeds max ${config.subagent_max_depth}'
 		result.duration_ms = time.now().unix_milli() - start_ms
 		return result
 	}
 
-	mut cfg, _ := host.resolve_subagent_config(spec)
+	cfg, _ := resolve_subagent_config(config, spec)
 	mut client := new_api_client(cfg)
 
 	// 子 agent 必须静默，避免污染父 agent 的 term_ui
@@ -250,7 +249,7 @@ fn spawn_one_inner(mut host SubagentHost, spec SubagentSpec, exec_id string) Sub
 
 	// trajectory 单独写一个文件
 	client.trajectory = new_trajectory_recorder(true)
-	client.trajectory.trajectory_file = host.trajectory_path_for(exec_id)
+	client.trajectory.trajectory_file = subagent_trajectory_path(trajectory_dir, exec_id)
 	result.trajectory_path = client.trajectory.trajectory_file
 	client.trajectory.start_recording(spec.prompt, cfg.model)
 
@@ -264,7 +263,7 @@ fn spawn_one_inner(mut host SubagentHost, spec SubagentSpec, exec_id string) Sub
 
 	// summary 续写：< min_length 时自动追加一轮 prompt
 	mut final_text := summary
-	min_len := host.config.subagent_summary_min_length
+	min_len := config.subagent_summary_min_length
 	if min_len > 0 && final_text.len < min_len {
 		client.add_message('user',
 			'请详细扩写你刚才完成的工作与关键发现，至少 ${min_len} 字。')
@@ -296,61 +295,160 @@ fn estimate_tool_call_count(c ApiClient) int {
 	return n
 }
 
-// 单个 spawn（带超时 + 简化同步阻塞）
-pub fn (mut host SubagentHost) run(spec SubagentSpec) SubagentResult {
-	exec_id := host.next_exec_id()
+// === 并行调度（每子 agent 一个 OS 线程，channel semaphore 限并发） ===
+
+struct SwarmEvent {
+	idx     int
+	started bool
+	result  SubagentResult
+}
+
+struct SwarmJob {
+	idx            int
+	config         Config
+	trajectory_dir string
+	spec           SubagentSpec
+	exec_id        string
+	sem            chan int
+	event_ch       chan SwarmEvent
+}
+
+fn swarm_job_runner(job SwarmJob) {
+	// 获取并发槽位（满了会阻塞，形成自然排队与背压）
+	job.sem <- 1
+	job.event_ch <- SwarmEvent{
+		idx:     job.idx
+		started: true
+	}
+	res := spawn_one_isolated(job.config, job.trajectory_dir, job.spec, job.exec_id)
+	_ = <-job.sem
+	job.event_ch <- SwarmEvent{
+		idx:    job.idx
+		result: res
+	}
+}
+
+fn subagent_effective_timeout_ms(config Config, spec SubagentSpec) i64 {
 	mut timeout_ms := if spec.timeout_ms > 0 {
 		spec.timeout_ms
 	} else {
-		host.config.subagent_default_timeout_ms
+		config.subagent_default_timeout_ms
 	}
 	if timeout_ms <= 0 {
 		timeout_ms = 1800000 // 兜底 30 分钟
 	}
-
-	// 用 chan + timeout 模拟超时
-	result_ch := chan SubagentResult{cap: 1}
-	done_ch := chan bool{}
-
-	host.active_children[exec_id] = SubagentHandle{
-		spec:      spec
-		started:   time.now().unix_milli()
-		cancel_ch: done_ch
-	}
-
-	// 由于 V goroutine 闭包捕获的限制，用顶层 fn + 传递 host 不安全（mut host 不能安全跨 goroutine）。
-	// 简化策略：直接同步跑（V 本身并发支持弱）。如果未来要真并行，需要把 host 改成按值传递。
-	defer {
-		host.active_children.delete(exec_id)
-	}
-
-	res := spawn_one_inner(mut host, spec, exec_id)
-	mut final_res := res
-	final_res.trajectory_path = host.trajectory_path_for(exec_id)
-	host.active_children.delete(exec_id)
-	result_ch <- final_res
-	_ = done_ch
-	_ = timeout_ms // 暂时未实现真超时（V select + timer 需要更多验证）
-	return <-result_ch
+	return i64(timeout_ms)
 }
 
-// 批量并行：受 semaphore 限制并发数 + ramp 间隔
+// 单个 spawn（走与批量相同的调度路径，超时真实生效）
+pub fn (mut host SubagentHost) run(spec SubagentSpec) SubagentResult {
+	results := host.run_batch([spec])
+	return results[0]
+}
+
+// 批量并行：每个子 agent 一个线程，semaphore 控制并发上限，ramp 间隔错峰启动。
+// 超时按「实际开始时间 + timeout」判定；超时任务标记为 timeout，其线程成为
+// 孤儿继续跑到自然结束，迟到结果直接丢弃（不阻塞：event_ch 容量足够）。
 pub fn (mut host SubagentHost) run_batch(specs []SubagentSpec) []SubagentResult {
 	mut results := []SubagentResult{len: specs.len}
 	if specs.len == 0 {
 		return results
 	}
 
-	max_conc := host.config.subagent_max_concurrency
+	max_conc := if host.config.subagent_max_concurrency > 0 {
+		host.config.subagent_max_concurrency
+	} else {
+		5
+	}
 	interval_ms := host.config.subagent_ramp_interval_ms
+	sem := chan int{cap: max_conc}
+	event_ch := chan SwarmEvent{cap: specs.len * 2 + 1}
 
+	mut exec_ids := []string{len: specs.len}
+	mut timeouts := []i64{len: specs.len}
 	for i, spec in specs {
-		// ramp：超过 max_conc 后等间隔
+		// ramp：超过并发上限后按间隔错峰创建线程
 		if i >= max_conc && interval_ms > 0 {
 			time.sleep(time.millisecond * interval_ms)
 		}
+		exec_ids[i] = host.next_exec_id()
+		timeouts[i] = subagent_effective_timeout_ms(host.config, spec)
+		host.active_children[exec_ids[i]] = SubagentHandle{
+			spec:      spec
+			started:   0
+			cancel_ch: chan bool{cap: 1}
+		}
+		spawn swarm_job_runner(SwarmJob{
+			idx:            i
+			config:         host.config
+			trajectory_dir: host.trajectory_dir
+			spec:           spec
+			exec_id:        exec_ids[i]
+			sem:            sem
+			event_ch:       event_ch
+		})
+	}
 
-		results[i] = host.run(spec)
+	mut done_flags := []bool{len: specs.len}
+	mut started_at := []i64{len: specs.len}
+	mut finished := 0
+	for finished < specs.len {
+		now := time.now().unix_milli()
+		// 找最近的超时点（仅已开始且未完成的任务）
+		mut wait_ms := i64(5000)
+		for i in 0 .. specs.len {
+			if done_flags[i] || started_at[i] == 0 {
+				continue
+			}
+			remain := started_at[i] + timeouts[i] - now
+			if remain < wait_ms {
+				wait_ms = remain
+			}
+		}
+		if wait_ms < 0 {
+			wait_ms = 0
+		}
+		select {
+			ev := <-event_ch {
+				if ev.started {
+					started_at[ev.idx] = time.now().unix_milli()
+					exec_id := exec_ids[ev.idx]
+					if exec_id in host.active_children {
+						mut handle := host.active_children[exec_id]
+						handle.started = started_at[ev.idx]
+						host.active_children[exec_id] = handle
+					}
+				} else if !done_flags[ev.idx] {
+					done_flags[ev.idx] = true
+					results[ev.idx] = ev.result
+					finished++
+					host.active_children.delete(exec_ids[ev.idx])
+				}
+				// 已超时完成的任务：迟到结果直接丢弃
+			}
+			time.Duration(wait_ms) * time.millisecond {
+				now2 := time.now().unix_milli()
+				for i in 0 .. specs.len {
+					if done_flags[i] || started_at[i] == 0 {
+						continue
+					}
+					if now2 - started_at[i] >= timeouts[i] {
+						done_flags[i] = true
+						results[i] = SubagentResult{
+							exec_id:         exec_ids[i]
+							profile:         specs[i].profile
+							status:          .timeout
+							error:           'timeout after ${timeouts[i]}ms'
+							duration_ms:     now2 - started_at[i]
+							trajectory_path: subagent_trajectory_path(host.trajectory_dir,
+								exec_ids[i])
+						}
+						finished++
+						host.active_children.delete(exec_ids[i])
+					}
+				}
+			}
+		}
 	}
 	return results
 }

@@ -1,5 +1,9 @@
 module main
 
+import net
+import os
+import time
+
 // subagent_test.v - sub-agent 系统的单元测试
 // 只测试 profile / spec / result / host / spec_from_input 这些纯数据结构与解析逻辑。
 // 真正的 chat() 调用需要 API key，在 integration_test.sh 里跑（需要 --with-api）。
@@ -137,7 +141,7 @@ fn test_host_construction_respects_config_concurrency() {
 	mut cfg := default_config()
 	cfg.subagent_max_concurrency = 3
 	h := new_subagent_host(cfg, '/tmp/traj')
-	// semaphore 容量不可直接读，但 next_exec_id 与 active_children 应就绪
+	// next_exec_id 与 active_children 应就绪
 	assert h.next_exec_id == 1
 	assert h.active_children.len == 0
 }
@@ -241,4 +245,145 @@ fn test_depth_limit_exceeded_marks_failed() {
 	assert res.status == .failed
 	assert res.error.contains('depth')
 	assert res.duration_ms >= 0
+}
+
+// ===== 真并行调度 =====
+
+struct FakeApiConn {
+	conn  &net.TcpConn
+	delay int
+}
+
+fn fake_api_handle_conn(job FakeApiConn) {
+	mut conn := job.conn
+	conn.set_read_timeout(2 * time.second)
+	mut buf := []u8{len: 8192}
+	conn.read(mut buf) or {}
+	time.sleep(job.delay * time.millisecond)
+	body := '{"type":"error","error":{"type":"invalid_request_error","message":"bad request"}}'
+	resp := 'HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: ${body.len}\r\nConnection: close\r\n\r\n${body}'
+	conn.write_string(resp) or {}
+	conn.close() or {}
+}
+
+// 本地假 API：每个连接延迟 delay_ms 后返回 400，处理满 max_req 个请求后关闭。
+fn fake_api_server(port int, delay_ms int, max_req int, ready chan int) {
+	mut listener := net.listen_tcp(.ip, '127.0.0.1:${port}') or {
+		ready <- 0
+		return
+	}
+	ready <- 1
+	mut count := 0
+	for count < max_req {
+		conn := listener.accept() or { break }
+		spawn fake_api_handle_conn(FakeApiConn{
+			conn:  conn
+			delay: delay_ms
+		})
+		count++
+	}
+	listener.close() or {}
+}
+
+// 自校准并行验证：先测单 agent 基准耗时 t1，再测 4 个 agent 耗时 t4。
+// 串行实现 t4 ≈ 4×t1；真并行 t4 应接近 t1。用比值断言，免受机器负载影响。
+fn test_run_batch_runs_in_parallel() {
+	ready := chan int{cap: 1}
+	spawn fake_api_server(18099, 1500, 15, ready)
+	assert <-ready == 1, 'fake api server failed to start'
+
+	mut cfg := default_config()
+	cfg.api_url = 'http://127.0.0.1:18099/x'
+	cfg.api_key = 'test'
+	cfg.subagent_max_concurrency = 4
+	mut h := new_subagent_host(cfg, os.temp_dir())
+
+	start1 := time.now().unix_milli()
+	single := h.run_batch([SubagentSpec{
+		prompt: 'baseline'
+		depth:  1
+	}])
+	t1 := time.now().unix_milli() - start1
+	assert single[0].status == .failed
+
+	specs := [
+		SubagentSpec{
+			prompt: 'task 1'
+			depth:  1
+		},
+		SubagentSpec{
+			prompt: 'task 2'
+			depth:  1
+		},
+		SubagentSpec{
+			prompt: 'task 3'
+			depth:  1
+		},
+		SubagentSpec{
+			prompt: 'task 4'
+			depth:  1
+		},
+	]
+	start4 := time.now().unix_milli()
+	results := h.run_batch(specs)
+	t4 := time.now().unix_milli() - start4
+	assert results.len == 4
+	for r in results {
+		assert r.status == .failed
+	}
+	assert t4 < t1 * 2 + 5000, '4 agents took ${t4}ms vs single-agent baseline ${t1}ms (serial would be ~${4 * t1}ms)'
+}
+
+// 短超时：任务本身要跑 ~7.5 秒，timeout 800ms 应被调度器判定为超时。
+fn test_run_batch_timeout_marks_timeout() {
+	ready := chan int{cap: 1}
+	spawn fake_api_server(18098, 1500, 3, ready)
+	assert <-ready == 1, 'fake api server failed to start'
+
+	mut cfg := default_config()
+	cfg.api_url = 'http://127.0.0.1:18098/x'
+	cfg.api_key = 'test'
+	mut h := new_subagent_host(cfg, os.temp_dir())
+	specs := [
+		SubagentSpec{
+			prompt:     'slow task'
+			depth:      1
+			timeout_ms: 800
+		},
+	]
+	start := time.now().unix_milli()
+	results := h.run_batch(specs)
+	elapsed := time.now().unix_milli() - start
+	assert results.len == 1
+	assert results[0].status == .timeout
+	assert results[0].error.contains('timeout')
+	assert elapsed < 5000, 'timeout detection took ${elapsed}ms'
+}
+
+// 并发上限：depth 超限的任务瞬间失败（不打 API），验证批量结果按槽位返回。
+fn test_run_batch_results_ordered_by_slot() {
+	mut cfg := default_config()
+	cfg.subagent_max_depth = 1
+	mut h := new_subagent_host(cfg, os.temp_dir())
+	specs := [
+		SubagentSpec{
+			prompt: 'a'
+			depth:  5
+		},
+		SubagentSpec{
+			prompt: 'b'
+			depth:  5
+		},
+		SubagentSpec{
+			prompt: 'c'
+			depth:  5
+		},
+	]
+	results := h.run_batch(specs)
+	assert results.len == 3
+	for i, r in results {
+		assert r.status == .failed
+		assert r.error.contains('depth'), 'slot ${i}: ${r.error}'
+		assert r.exec_id.len > 0
+	}
 }
