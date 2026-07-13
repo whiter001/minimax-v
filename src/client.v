@@ -1199,20 +1199,50 @@ fn (mut c ApiClient) send_api_request(body_json string) !string {
 		println('[DEBUG] 发送请求... body=${body_json.len} bytes')
 	}
 
-	// Use curl for better reliability on Windows (V's mbedtls HTTP module has issues)
-	if c.debug && !c.silent_mode {
-		println('[DEBUG] 使用 curl 发送请求...')
+	// Prefer V's net.http; fall back to curl only on transport-level failure
+	// (V's mbedtls HTTP module has reliability issues on Windows)
+	mut transport_failed := false
+	mut headers := http.new_header()
+	headers.add(.authorization, 'Bearer ${c.api_key}')
+	headers.add(.content_type, 'application/json')
+	headers.add(.connection, 'close')
+	mut req := http.Request{
+		method:        .post
+		url:           c.api_url
+		header:        headers
+		data:          body_json
+		read_timeout:  180 * time.second
+		write_timeout: 60 * time.second
 	}
-	curl_result := c.send_api_request_via_curl(body_json) or {
-		c.logger.log_error('API',
-			'phase=api.request mode=${request_mode} duration_ms=${time.now().unix_milli() - start_ms} err=${err}')
-		c.clear_phase_status_line()
-		return err
+	response := req.do() or {
+		transport_failed = true
+		if c.debug && !c.silent_mode {
+			println('[DEBUG] net.http 请求失败 (${err.msg()})，回退 curl...')
+		}
+		http.Response{}
+	}
+
+	mut result_body := ''
+	if transport_failed {
+		result_body = c.send_api_request_via_curl(body_json) or {
+			c.logger.log_error('API',
+				'phase=api.request mode=${request_mode} duration_ms=${time.now().unix_milli() - start_ms} err=${err}')
+			c.clear_phase_status_line()
+			return err
+		}
+	} else {
+		if response.status_code != 200 {
+			c.logger.log_error('API',
+				'phase=api.request mode=${request_mode} duration_ms=${time.now().unix_milli() - start_ms} status=${response.status_code}')
+			c.clear_phase_status_line()
+			return error('API Error ${response.status_code}: ${response.body}')
+		}
+		result_body = response.body
 	}
 	c.logger.log_phase_end('api.request', time.now().unix_milli() - start_ms,
-		'mode=${request_mode}+curl bytes=${body_json.len} status=200 body_bytes=${curl_result.len}')
+		'mode=${request_mode} bytes=${body_json.len} status=200 body_bytes=${result_body.len}')
 	c.clear_phase_status_line()
-	return curl_result
+	return result_body
 }
 
 fn (mut c ApiClient) send_api_request_via_curl(body_json string) !string {
