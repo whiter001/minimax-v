@@ -1787,6 +1787,11 @@ fn (mut c ApiClient) chat(prompt string) !string {
 			}
 		}
 
+		// Inject finished background task notifications before the next request.
+		for notice in c.bash_session.drain_finished_notifications() {
+			c.add_message('user', 'SYSTEM: ${notice}')
+		}
+
 		body_json := c.build_request_json()
 
 		mut parsed := ParsedResponse{}

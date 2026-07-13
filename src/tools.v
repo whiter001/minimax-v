@@ -50,9 +50,11 @@ fn is_windows_reserved_name(path string) bool {
 
 struct BashSession {
 mut:
-	cwd     string
-	env     map[string]string
-	timeout int // seconds
+	cwd        string
+	env        map[string]string
+	timeout    int // seconds
+	bg_tasks   map[string]&BackgroundTask
+	bg_counter int
 }
 
 fn new_bash_session(workspace string) BashSession {
@@ -166,11 +168,9 @@ fn format_shell_result(exit_code int, cwd string, output string) string {
 	return '${output}\n[cwd: ${cwd}]'
 }
 
-fn (mut s BashSession) execute(command string) string {
-	if command.len == 0 {
-		return 'Error: command is required'
-	}
-
+// check_dangerous_command returns an error message if the command matches the
+// dangerous-command blocklist (shared by foreground and background execution).
+fn check_dangerous_command(command string) ?string {
 	// Windows-specific dangerous commands
 	windows_dangerous := ['rmdir /s /q', 'del /s /q', 'format', 'cipher /w', 'cipher.exe /w']
 	// Universal dangerous commands
@@ -194,6 +194,17 @@ fn (mut s BashSession) execute(command string) string {
 		|| u_cmd.contains('> AUX') || u_cmd.contains('>> NUL') || u_cmd.contains('>> CON')
 		|| u_cmd.contains('>> PRN') || u_cmd.contains('>> AUX') {
 		return 'Error: ⚠️ 禁止重定向到 Windows 保留设备 (NUL, CON, PRN, AUX)'
+	}
+	return none
+}
+
+fn (mut s BashSession) execute(command string) string {
+	if command.len == 0 {
+		return 'Error: command is required'
+	}
+
+	if danger_msg := check_dangerous_command(command) {
+		return danger_msg
 	}
 
 	if should_use_windows_direct_command(command) {
@@ -4410,8 +4421,23 @@ fn get_tool_schema_defs() []ToolSchemaDef {
 		},
 		ToolSchemaDef{
 			name:         'bash'
-			description:  'A persistent bash shell session. Working directory and environment variables are preserved between calls. Use this instead of run_command for multi-step operations.'
-			input_schema: '{"type":"object","properties":{"command":{"type":"string","description":"The bash command to execute"},"restart":{"type":"boolean","description":"Set to true to restart the bash session (reset cwd and env)"}},"required":["command"]}'
+			description:  'A persistent bash shell session. Working directory and environment variables are preserved between calls. Use this instead of run_command for multi-step operations. Set run_in_background=true for long-running commands (builds, watchers): returns a task_id immediately and you get notified on completion.'
+			input_schema: '{"type":"object","properties":{"command":{"type":"string","description":"The bash command to execute"},"restart":{"type":"boolean","description":"Set to true to restart the bash session (reset cwd and env)"},"run_in_background":{"type":"boolean","description":"Run the command as a background task and return its task_id immediately (default false)"},"timeout_ms":{"type":"integer","description":"(background only) Kill the task after this many milliseconds (default 1800000)"}},"required":["command"]}'
+		},
+		ToolSchemaDef{
+			name:         'task_list'
+			description:  'List all background tasks with their status (running/completed/failed/stopped/timeout), duration, and command.'
+			input_schema: '{"type":"object","properties":{},"required":[]}'
+		},
+		ToolSchemaDef{
+			name:         'task_output'
+			description:  'Read the current status and captured output of a background task by task_id.'
+			input_schema: '{"type":"object","properties":{"task_id":{"type":"string","description":"The background task ID returned by bash run_in_background"}},"required":["task_id"]}'
+		},
+		ToolSchemaDef{
+			name:         'task_stop'
+			description:  'Stop a running background task (kills its process tree).'
+			input_schema: '{"type":"object","properties":{"task_id":{"type":"string","description":"The background task ID to stop"}},"required":["task_id"]}'
 		},
 		ToolSchemaDef{
 			name:         'read_file'
@@ -4710,7 +4736,30 @@ fn execute_tool_use_in_workspace_inner(mut bash_session BashSession, tool ToolUs
 				bash_session = new_bash_session(workspace)
 				return 'Bash session restarted. cwd=${bash_session.cwd}'
 			}
+			run_bg := (tool.input['run_in_background'] or { 'false' }) == 'true'
+			if run_bg {
+				timeout_ms := i64(parse_int_input(tool.input, 'timeout_ms', 0))
+				mut env_prefix := ''
+				for key, val in bash_session.env {
+					env_prefix += "export ${key}='${val.replace("'", "'\\''")}'; "
+				}
+				task := bash_session.start_background_task(env_prefix + cmd, timeout_ms) or {
+					return 'Error: ${err.msg()}'
+				}
+				return 'Background task started: ${task.id}\noutput: ${task.output_path}\nYou will be notified when it finishes; use task_output to check progress.'
+			}
 			return bash_session.execute(cmd)
+		}
+		'task_list' {
+			return bash_session.bg_task_list_text()
+		}
+		'task_output' {
+			id := tool.input['task_id'] or { return 'Error: task_id is required' }
+			return bash_session.bg_task_output_text(id)
+		}
+		'task_stop' {
+			id := tool.input['task_id'] or { return 'Error: task_id is required' }
+			return bash_session.bg_task_stop_text(id)
 		}
 		'read_file' {
 			path := resolve_workspace_path(tool.input['path'] or { '' }, workspace)
@@ -4924,7 +4973,8 @@ fn execute_tool_use_with_mcp(mut mcp McpManager, mut bash_session BashSession, t
 		'record_experience', 'session_note', 'task_done', 'grep_search', 'find_files',
 		'sequentialthinking', 'json_edit', 'ask_user', 'update_working_checkpoint', 'todo_manager',
 		'read_many_files', 'activate_skill', 'cron', 'list_files', 'generate_image',
-		'generate_speech', 'send_mail', 'spawn_subagent', 'agent_swarm']
+		'generate_speech', 'send_mail', 'spawn_subagent', 'agent_swarm', 'task_list', 'task_output',
+		'task_stop']
 	if tool.name in builtin_names {
 		return execute_tool_use_in_workspace(mut bash_session, tool, workspace, config, acp_mode,
 			term_ui_enabled, term_ui_app)

@@ -1164,7 +1164,7 @@ fn test_get_tools_schema_json_parses_structurally() {
 		return
 	}
 	arr := parsed.arr()
-	assert arr.len == 30
+	assert arr.len == 33
 	mut seen := map[string]bool{}
 	for item in arr {
 		obj := item.as_map()
