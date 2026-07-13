@@ -60,7 +60,9 @@ fn test_profile_name_roundtrip() {
 // ===== SubagentSpec 默认值 =====
 
 fn test_spec_defaults() {
-	mut spec := SubagentSpec{ prompt: 'test' }
+	mut spec := SubagentSpec{
+		prompt: 'test'
+	}
 	assert spec.profile == .coder
 	assert spec.depth == 1
 	assert spec.model == ''
@@ -78,21 +80,27 @@ fn test_result_status_name() {
 }
 
 fn test_result_is_terminal() {
-	r1 := SubagentResult{ status: .running }
+	r1 := SubagentResult{
+		status: .running
+	}
 	assert !r1.is_terminal()
-	r2 := SubagentResult{ status: .completed }
+	r2 := SubagentResult{
+		status: .completed
+	}
 	assert r2.is_terminal()
-	r3 := SubagentResult{ status: .failed }
+	r3 := SubagentResult{
+		status: .failed
+	}
 	assert r3.is_terminal()
 }
 
 fn test_result_to_json_contains_required_fields() {
 	r := SubagentResult{
-		exec_id: 'subagent_1_test'
-		profile: .coder
-		status:  .completed
-		summary: '完成了 foo 的修复'
-		duration_ms: 1234
+		exec_id:         'subagent_1_test'
+		profile:         .coder
+		status:          .completed
+		summary:         '完成了 foo 的修复'
+		duration_ms:     1234
 		trajectory_path: '/tmp/traj.json'
 	}
 	json := r.to_json()
@@ -106,9 +114,9 @@ fn test_result_to_json_contains_required_fields() {
 
 fn test_result_short_string() {
 	r := SubagentResult{
-		profile: .explore
-		status:  .completed
-		summary: '我发现 src/tools.v 是工具中心，4660 行'
+		profile:     .explore
+		status:      .completed
+		summary:     '我发现 src/tools.v 是工具中心，4660 行'
 		duration_ms: 5000
 	}
 	s := r.short_string()
@@ -149,14 +157,8 @@ fn test_spec_from_input_minimal() {
 }
 
 fn test_spec_from_input_full() {
-	input := mk_input(
-		'prompt', '跑测试',
-		'profile', 'explore',
-		'model', 'MiniMax-M3',
-		'max_tokens', '8192',
-		'max_rounds', '40',
-		'timeout_ms', '120000',
-	)
+	input := mk_input('prompt', '跑测试', 'profile', 'explore', 'model', 'MiniMax-M3',
+		'max_tokens', '8192', 'max_rounds', '40', 'timeout_ms', '120000')
 	spec := subagent_spec_from_input(input, 2, 'p1') or {
 		assert false, err.msg()
 		return
@@ -171,28 +173,21 @@ fn test_spec_from_input_full() {
 
 fn test_spec_from_input_rejects_empty_prompt() {
 	input := mk_input('prompt', '')
-	_ := subagent_spec_from_input(input, 1, '') or {
-		return // 期望返回错误，测试通过
-	}
+	_ := subagent_spec_from_input(input, 1, '') or { return }
 	assert false, 'expected error for empty prompt'
 }
 
 fn test_spec_from_input_rejects_missing_prompt() {
 	input := mk_input('profile', 'coder')
-	_ := subagent_spec_from_input(input, 1, '') or {
-		return // 期望返回错误
-	}
+	_ := subagent_spec_from_input(input, 1, '') or { return }
 	assert false, 'expected error for missing prompt'
 }
 
 // ===== swarm_specs_from_input 解析 =====
 
 fn test_swarm_specs_simple_items() {
-	input := mk_input(
-		'prompt_template', '总结 {{item}} 这个模块',
-		'items', '["src/skills.v", "src/tools.v", "src/agent.v"]',
-		'profile', 'explore',
-	)
+	input := mk_input('prompt_template', '总结 {{item}} 这个模块', 'items',
+		'["src/skills.v", "src/tools.v", "src/agent.v"]', 'profile', 'explore')
 	specs := swarm_specs_from_input(input) or {
 		assert false, err.msg()
 		return
@@ -206,11 +201,8 @@ fn test_swarm_specs_simple_items() {
 }
 
 fn test_swarm_specs_single_item() {
-	input := mk_input(
-		'prompt_template', '查看 {{item}}',
-		'items', '"src/main.v"',
-		'profile', 'coder',
-	)
+	input := mk_input('prompt_template', '查看 {{item}}', 'items', '"src/main.v"', 'profile',
+		'coder')
 	specs := swarm_specs_from_input(input) or {
 		assert false, err.msg()
 		return

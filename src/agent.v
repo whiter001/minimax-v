@@ -47,9 +47,9 @@ mut:
 	end_time     i64
 	agent_state  AgentState
 	// Sub-agent 关联（sub-agent 模式下填充）
-	profile      SubagentProfileKind // .coder/.explore/.plan/.custom；主 agent 留空
-	depth        int                 // 嵌套深度（主=0，sub-agent=1，sub-sub=2）
-	parent_exec  string              // 父 agent 的 exec_id（仅 sub-agent 填充）
+	profile     SubagentProfileKind // .coder/.explore/.plan/.custom；主 agent 留空
+	depth       int                 // 嵌套深度（主=0，sub-agent=1，sub-sub=2）
+	parent_exec string              // 父 agent 的 exec_id（仅 sub-agent 填充）
 }
 
 fn new_agent_execution(task string) AgentExecution {

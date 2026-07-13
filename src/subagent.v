@@ -63,7 +63,8 @@ fn subagent_profile(kind SubagentProfileKind) SubagentProfile {
 			SubagentProfile{
 				kind:          .explore
 				system_prompt: '你是一个只读探索子 agent。只能使用 read_file、list_dir、grep_files、find_files、match_sop、session_notes、activate_skill 等只读工具，不能修改任何文件、不执行可能产生副作用的命令。完成后用简洁的中文总结你发现了什么，附上文件路径与行号引用。'
-				enable_tools:  ['read_file', 'list_dir', 'grep_files', 'find_files', 'match_sop', 'session_notes', 'activate_skill']
+				enable_tools:  ['read_file', 'list_dir', 'grep_files', 'find_files', 'match_sop',
+					'session_notes', 'activate_skill']
 				max_rounds:    20
 				max_tokens:    16384
 				timeout_ms:    600000
@@ -110,7 +111,7 @@ pub mut:
 	max_tokens  int    // 0 = 用 profile 默认
 	max_rounds  int    // 0 = 用 profile 默认
 	timeout_ms  int    // 0 = 用 config 默认
-	depth       int    = 1
+	depth       int = 1
 	parent_exec string
 }
 
@@ -172,7 +173,7 @@ pub fn new_subagent_host(config Config, trajectory_dir string) SubagentHost {
 		config:          config
 		trajectory_dir:  trajectory_dir
 		next_exec_id:    1
-		semaphore:       chan int{ cap: max_conc }
+		semaphore:       chan int{cap: max_conc}
 		active_children: map[string]SubagentHandle{}
 	}
 }
@@ -189,7 +190,7 @@ pub fn default_subagent_trajectory_dir() string {
 fn (mut host SubagentHost) next_exec_id() string {
 	id := host.next_exec_id
 	host.next_exec_id++
-	return 'subagent_${id}_${time.now().custom_format("YYYYMMDD_hhmmss")}'
+	return 'subagent_${id}_${time.now().custom_format('YYYYMMDD_hhmmss')}'
 }
 
 // 解析 spec，应用 profile 默认值与 config 默认值，返回 effective 子配置
@@ -265,7 +266,8 @@ fn spawn_one_inner(mut host SubagentHost, spec SubagentSpec, exec_id string) Sub
 	mut final_text := summary
 	min_len := host.config.subagent_summary_min_length
 	if min_len > 0 && final_text.len < min_len {
-		client.add_message('user', '请详细扩写你刚才完成的工作与关键发现，至少 ${min_len} 字。')
+		client.add_message('user',
+			'请详细扩写你刚才完成的工作与关键发现，至少 ${min_len} 字。')
 		expanded := client.chat('') or { final_text }
 		final_text = expanded
 	}
@@ -297,13 +299,17 @@ fn estimate_tool_call_count(c ApiClient) int {
 // 单个 spawn（带超时 + 简化同步阻塞）
 pub fn (mut host SubagentHost) run(spec SubagentSpec) SubagentResult {
 	exec_id := host.next_exec_id()
-	mut timeout_ms := if spec.timeout_ms > 0 { spec.timeout_ms } else { host.config.subagent_default_timeout_ms }
+	mut timeout_ms := if spec.timeout_ms > 0 {
+		spec.timeout_ms
+	} else {
+		host.config.subagent_default_timeout_ms
+	}
 	if timeout_ms <= 0 {
 		timeout_ms = 1800000 // 兜底 30 分钟
 	}
 
 	// 用 chan + timeout 模拟超时
-	result_ch := chan SubagentResult{ cap: 1 }
+	result_ch := chan SubagentResult{cap: 1}
 	done_ch := chan bool{}
 
 	host.active_children[exec_id] = SubagentHandle{
@@ -446,9 +452,7 @@ pub fn swarm_specs_from_input(input map[string]string) ![]SubagentSpec {
 
 // 构造 tool_result 字符串：单 spawn 返回 JSON 格式 SubagentResult
 pub fn spawn_subagent_tool(config Config, input map[string]string) string {
-	spec := subagent_spec_from_input(input, 1, '') or {
-		return 'Error: ${err.msg()}'
-	}
+	spec := subagent_spec_from_input(input, 1, '') or { return 'Error: ${err.msg()}' }
 	traj_dir := default_subagent_trajectory_dir()
 	mut host := new_subagent_host(config, traj_dir)
 	res := host.run(spec)
@@ -457,9 +461,7 @@ pub fn spawn_subagent_tool(config Config, input map[string]string) string {
 
 // agent_swarm 工具入口：批量 + JSON 数组 results
 pub fn agent_swarm_tool(config Config, input map[string]string) string {
-	specs := swarm_specs_from_input(input) or {
-		return 'Error: ${err.msg()}'
-	}
+	specs := swarm_specs_from_input(input) or { return 'Error: ${err.msg()}' }
 	if specs.len == 0 {
 		return 'Error: agent_swarm items is empty'
 	}

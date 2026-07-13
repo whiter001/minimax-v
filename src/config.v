@@ -55,11 +55,11 @@ pub mut:
 	smtp_from     string
 	smtp_to       string
 	// Subagent (并行子 agent) 控制
-	subagent_max_concurrency     int // 同时跑的子 agent 上限
-	subagent_default_timeout_ms  int // 单个 sub-agent 默认超时（毫秒）
-	subagent_max_depth           int // sub-agent 嵌套深度上限（防递归）
-	subagent_summary_min_length  int // 子 agent 摘要小于此长度会触发一次续写
-	subagent_ramp_interval_ms    int // 批量起 sub-agent 时的启动间隔（毫秒）
+	subagent_max_concurrency    int // 同时跑的子 agent 上限
+	subagent_default_timeout_ms int // 单个 sub-agent 默认超时（毫秒）
+	subagent_max_depth          int // sub-agent 嵌套深度上限（防递归）
+	subagent_summary_min_length int // 子 agent 摘要小于此长度会触发一次续写
+	subagent_ramp_interval_ms   int // 批量起 sub-agent 时的启动间隔（毫秒）
 }
 
 fn default_config() Config {
