@@ -1,6 +1,7 @@
 module main
 
 import os
+import x.json2
 
 // ===== resolve_workspace_path =====
 
@@ -1155,6 +1156,32 @@ fn test_get_tools_schema_json_valid() {
 	assert json.contains('todo_manager')
 	assert json.contains('read_many_files')
 	assert json.contains('activate_skill')
+}
+
+fn test_get_tools_schema_json_parses_structurally() {
+	parsed := json2.decode[json2.Any](get_tools_schema_json(), json2.DecoderOptions{}) or {
+		assert false, 'tools schema is not valid JSON: ${err.msg()}'
+		return
+	}
+	arr := parsed.arr()
+	assert arr.len == 30
+	mut seen := map[string]bool{}
+	for item in arr {
+		obj := item.as_map()
+		name := (obj['name'] or { json2.Any('') }).str()
+		description := (obj['description'] or { json2.Any('') }).str()
+		assert name.len > 0
+		assert description.len > 0
+		assert name !in seen, 'duplicate tool name: ${name}'
+		seen[name] = true
+		schema := (obj['input_schema'] or {
+			assert false, 'tool ${name} missing input_schema'
+			json2.Any(map[string]json2.Any{})
+		}).as_map()
+		assert (schema['type'] or { json2.Any('') }).str() == 'object'
+		assert 'properties' in schema, 'tool ${name} schema missing properties'
+		assert 'required' in schema, 'tool ${name} schema missing required'
+	}
 }
 
 fn test_mouse_control_requires_flag() {
